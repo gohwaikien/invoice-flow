@@ -1,0 +1,290 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { Session } from "next-auth";
+import {
+  FileText,
+  Plus,
+  LogOut,
+  RefreshCcw,
+  Filter,
+  Loader2,
+  Building2,
+  Truck,
+  DollarSign,
+  Clock,
+  CheckCircle,
+  Shield,
+} from "lucide-react";
+import Link from "next/link";
+import { signOut } from "next-auth/react";
+import { Button } from "@/components/ui/button";
+import { InvoiceUpload } from "@/components/InvoiceUpload";
+import { InvoiceTable, Invoice } from "@/components/InvoiceTable";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+interface DashboardClientProps {
+  session: Session;
+}
+
+export function DashboardClient({ session }: DashboardClientProps) {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [filter, setFilter] = useState<"all" | "PENDING" | "PARTIAL" | "COMPLETED">("all");
+
+  const userRole = session.user.role as "ADMIN" | "SUPPLIER" | "BUSINESS";
+
+  const fetchInvoices = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filter !== "all") params.set("status", filter);
+
+      const response = await fetch(`/api/invoices?${params.toString()}`);
+      if (response.ok) {
+        const data = await response.json();
+        setInvoices(data);
+      }
+    } catch (error) {
+      console.error("Error fetching invoices:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [filter]);
+
+  useEffect(() => {
+    fetchInvoices();
+  }, [fetchInvoices]);
+
+  // Calculate stats
+  const stats = {
+    total: invoices.length,
+    pending: invoices.filter((i) => i.status === "PENDING").length,
+    partial: invoices.filter((i) => i.status === "PARTIAL").length,
+    completed: invoices.filter((i) => i.status === "COMPLETED").length,
+    totalAmount: invoices.reduce((sum, i) => sum + i.totalAmount, 0),
+    paidAmount: invoices.reduce((sum, i) => sum + i.paidAmount, 0),
+  };
+
+  // Format currency with thousand separators
+  const formatCurrency = (amount: number) => {
+    return amount.toLocaleString("en-MY", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600">
+              <FileText className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold text-slate-900">
+                InvoiceFlow
+              </h1>
+              <div className="flex items-center gap-2">
+                {userRole === "SUPPLIER" ? (
+                  <Truck className="h-3.5 w-3.5 text-slate-400" />
+                ) : (
+                  <Building2 className="h-3.5 w-3.5 text-slate-400" />
+                )}
+                <span className="text-xs text-slate-500">{userRole}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Admin Link */}
+            {userRole === "ADMIN" && (
+              <Link href="/admin">
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Shield className="h-4 w-4 text-purple-500" />
+                  <span className="hidden sm:inline">Admin</span>
+                </Button>
+              </Link>
+            )}
+            {/* User info */}
+            <div className="hidden items-center gap-3 sm:flex">
+              {session.user.image && (
+                <img
+                  src={session.user.image}
+                  alt=""
+                  className="h-8 w-8 rounded-full"
+                />
+              )}
+              <div className="text-right">
+                <p className="text-sm font-medium text-slate-900">
+                  {session.user.name}
+                </p>
+                <p className="text-xs text-slate-500">{session.user.email}</p>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => signOut({ callbackUrl: "/auth/signin" })}
+              title="Sign out"
+            >
+              <LogOut className="h-5 w-5" />
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        {/* Stats Cards */}
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-slate-500">
+                Total Invoices
+              </CardTitle>
+              <FileText className="h-5 w-5 text-slate-400" />
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold text-slate-900">{stats.total}</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-slate-500">
+                {userRole === "SUPPLIER" ? "Total Receivable" : "Total Payable"}
+              </CardTitle>
+              <DollarSign className="h-5 w-5 text-slate-400" />
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold text-slate-900">
+                RM {formatCurrency(stats.totalAmount)}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-slate-500">
+                {userRole === "SUPPLIER" ? "Amount Received" : "Amount Paid"}
+              </CardTitle>
+              <CheckCircle className="h-5 w-5 text-emerald-500" />
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold text-emerald-600">
+                RM {formatCurrency(stats.paidAmount)}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-slate-500">
+                Pending
+              </CardTitle>
+              <Clock className="h-5 w-5 text-amber-500" />
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold text-amber-600">
+                RM {formatCurrency(stats.totalAmount - stats.paidAmount)}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Actions Bar */}
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Filter className="h-5 w-5 text-slate-400" />
+            <div className="flex rounded-lg border border-slate-200 bg-white p-1">
+              {["all", "PENDING", "PARTIAL", "COMPLETED"].map((status) => (
+                <button
+                  key={status}
+                  onClick={() => setFilter(status as typeof filter)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    filter === status
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  {status === "all" ? "All" : status.charAt(0) + status.slice(1).toLowerCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={fetchInvoices} size="icon">
+              <RefreshCcw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+            </Button>
+            {userRole === "SUPPLIER" && (
+              <Button onClick={() => setShowUploadModal(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Upload Invoice
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Invoice Table */}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+          </div>
+        ) : (
+          <InvoiceTable
+            invoices={invoices}
+            userRole={userRole}
+            onRefresh={fetchInvoices}
+          />
+        )}
+      </main>
+
+      {/* Upload Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowUploadModal(false)}
+          />
+          <div className="relative z-10 w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-slate-900">
+                Upload Invoice
+              </h2>
+              <button
+                onClick={() => setShowUploadModal(false)}
+                className="rounded-full p-2 hover:bg-slate-100"
+              >
+                <svg
+                  className="h-5 w-5 text-slate-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+            <InvoiceUpload
+              onSuccess={() => {
+                setShowUploadModal(false);
+                fetchInvoices();
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
