@@ -1,0 +1,28 @@
+# This file specifies files that are NOT uploaded to Cloud Build
+
+# Git files
+.git
+.gitignore
+
+# Dependencies (will be installed fresh)
+node_modules
+
+# Build outputs
+.next
+out
+build
+
+# Local files
+.DS_Store
+*.pem
+npm-debug.log*
+.vercel
+
+# Env files (set via Cloud Run env vars)
+.env
+.env.local
+.env.production
+
+# Uploaded files (don't deploy these)
+public/uploads/
+

@@ -2,7 +2,8 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -56,6 +57,7 @@ model User {
   emailVerified DateTime?
   image         String?
   role          UserRole?
+  apiKey        String?   @unique
   accounts      Account[]
   sessions      Session[]
 
@@ -65,8 +67,11 @@ model User {
   // Invoices assigned to business (as recipient)
   receivedInvoices Invoice[] @relation("ReceivedInvoices")
 
-  // Payments made by business
+  // Payments recorded by supplier (what supplier paid on behalf)
   payments Payment[]
+
+  // Settlements made by business (paying back supplier)
+  settlements Settlement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -86,7 +91,7 @@ model Invoice {
   invoiceDate   DateTime?
   recipientName String?
   totalAmount   Float
-  paidAmount    Float         @default(0)
+  paidAmount    Float         @default(0)  // Amount settled by business
   status        InvoiceStatus @default(PENDING)
   fileUrl       String
   fileName      String
@@ -101,7 +106,11 @@ model Invoice {
   recipientId String?
   recipient   User?   @relation("ReceivedInvoices", fields: [recipientId], references: [id])
 
+  // Supplier's payments (what was paid on behalf)
   payments Payment[]
+
+  // Business's settlements (paying back supplier)
+  settlements Settlement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -119,9 +128,11 @@ model Payment {
   slipName  String?
   notes     String?
 
-  invoiceId String
-  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  // Invoice is now optional - payments can be created first, invoice attached later
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
 
+  // Who created/recorded this payment (Supplier)
   paidById String
   paidBy   User   @relation(fields: [paidById], references: [id])
 
@@ -130,4 +141,29 @@ model Payment {
 
   @@index([invoiceId])
   @@index([paidById])
+}
+
+// Settlement = Business paying back the supplier
+model Settlement {
+  id            String   @id @default(cuid())
+  amount        Float
+  date          DateTime @default(now())
+  slipUrl       String?  // Payment slip uploaded by business
+  slipName      String?
+  notes         String?
+  transactionId String?  @unique // OCR extracted, used to prevent duplicates
+
+  // Which invoice this settlement is for
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  // Who made the settlement (Business user)
+  settledById String
+  settledBy   User   @relation(fields: [settledById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([invoiceId])
+  @@index([settledById])
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { uploadToS3, generateFileKey } from "@/lib/s3";
+import { uploadFile, generateFileKey } from "@/lib/storage";
 
 export async function POST(
   request: NextRequest,
@@ -13,7 +13,8 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (session.user.role !== "BUSINESS") {
+  // Allow BUSINESS or ADMIN users to add payments
+  if (session.user.role !== "BUSINESS" && session.user.role !== "ADMIN") {
     return NextResponse.json(
       { error: "Only business users can add payments" },
       { status: 403 }
@@ -23,7 +24,7 @@ export async function POST(
   const { id: invoiceId } = await params;
 
   try {
-    // Check invoice exists and user has access
+    // Check invoice exists
     const invoice = await prisma.invoice.findUnique({
       where: { id: invoiceId },
     });
@@ -32,16 +33,12 @@ export async function POST(
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
 
-    if (invoice.recipientId !== session.user.id) {
-      return NextResponse.json(
-        { error: "You can only add payments to invoices assigned to you" },
-        { status: 403 }
-      );
-    }
+    // Business and Admin can add payments to any invoice
 
     const formData = await request.formData();
     const amount = parseFloat(formData.get("amount") as string);
     const notes = formData.get("notes") as string | null;
+    const dateStr = formData.get("date") as string | null;
     const slip = formData.get("slip") as File | null;
 
     if (isNaN(amount) || amount <= 0) {
@@ -56,16 +53,23 @@ export async function POST(
     let slipName: string | null = null;
     if (slip) {
       const buffer = Buffer.from(await slip.arrayBuffer());
-      slipUrl = generateFileKey("slips", slip.name);
+      const fileKey = generateFileKey("slips", slip.name);
+      slipUrl = await uploadFile(buffer, fileKey, slip.type);
       slipName = slip.name;
-      await uploadToS3(buffer, slipUrl, slip.type);
     }
 
+    // Parse date or use current date
+    const paymentDate = dateStr ? new Date(dateStr) : new Date();
+
     // Create payment
+    // Note: Payments are when suppliers pay on behalf of the business
+    // This increases what the business owes the supplier
+    // It does NOT reduce the invoice balance (only settlements do that)
     const payment = await prisma.payment.create({
       data: {
         amount,
         notes,
+        date: paymentDate,
         slipUrl,
         slipName,
         invoiceId,
@@ -78,24 +82,6 @@ export async function POST(
       },
     });
 
-    // Update invoice paid amount and status
-    const newPaidAmount = invoice.paidAmount + amount;
-    let newStatus = invoice.status;
-
-    if (newPaidAmount >= invoice.totalAmount) {
-      newStatus = "COMPLETED";
-    } else if (newPaidAmount > 0) {
-      newStatus = "PARTIAL";
-    }
-
-    await prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        paidAmount: newPaidAmount,
-        status: newStatus,
-      },
-    });
-
     return NextResponse.json(payment, { status: 201 });
   } catch (error) {
     console.error("Error creating payment:", error);
@@ -105,4 +91,3 @@ export async function POST(
     );
   }
 }
-

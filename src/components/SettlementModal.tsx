@@ -5,13 +5,13 @@ import { useDropzone } from "react-dropzone";
 import { X, Upload, File, Loader2, ScanText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { Invoice } from "./InvoiceTable";
 
-interface PaymentModalProps {
-  invoice: Invoice;
-  isOpen: boolean;
-  onClose: () => void;
-  onSuccess: () => void;
+interface Invoice {
+  id: string;
+  invoiceNumber: string | null;
+  fileName: string;
+  totalAmount: number;
+  paidAmount: number;
 }
 
 interface SlipOCRResult {
@@ -20,66 +20,64 @@ interface SlipOCRResult {
   transactionId: string | null;
 }
 
-export function PaymentModal({
+interface SettlementModalProps {
+  invoice: Invoice;
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+export function SettlementModal({
   invoice,
   isOpen,
   onClose,
   onSuccess,
-}: PaymentModalProps) {
+}: SettlementModalProps) {
   const remaining = invoice.totalAmount - invoice.paidAmount;
   
   const [amount, setAmount] = useState(remaining.toFixed(2));
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [notes, setNotes] = useState("");
+  const [transactionId, setTransactionId] = useState("");
   const [slip, setSlip] = useState<File | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [slipOcrResults, setSlipOcrResults] = useState<SlipOCRResult | null>(null);
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
-  const [ocrResult, setOcrResult] = useState<SlipOCRResult | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const processSlipOCR = async (file: File) => {
-    setIsOcrProcessing(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch("/api/ocr/slip", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (response.ok) {
-        const data: SlipOCRResult = await response.json();
-        setOcrResult(data);
-        
-        // Auto-fill extracted data
-        if (data.amount && data.amount <= remaining) {
-          setAmount(data.amount.toFixed(2));
-        }
-        if (data.date) {
-          setDate(data.date);
-        }
-        if (data.transactionId) {
-          setNotes((prev) => 
-            prev ? `${prev}\nRef: ${data.transactionId}` : `Ref: ${data.transactionId}`
-          );
-        }
-      }
-    } catch (err) {
-      console.error("OCR failed:", err);
-    } finally {
-      setIsOcrProcessing(false);
-    }
-  };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
-      const file = acceptedFiles[0];
-      setSlip(file);
-      setOcrResult(null);
-      await processSlipOCR(file);
+      const uploadedFile = acceptedFiles[0];
+      setSlip(uploadedFile);
+      setError(null);
+      setSlipOcrResults(null);
+      setIsOcrProcessing(true);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", uploadedFile);
+
+        const response = await fetch("/api/ocr/slip", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (response.ok) {
+          const data: SlipOCRResult = await response.json();
+          setSlipOcrResults(data);
+
+          // Pre-fill amount, date, and transaction ID if OCR found them
+          if (data.amount) setAmount(data.amount.toFixed(2));
+          if (data.date) setDate(data.date);
+          if (data.transactionId) setTransactionId(data.transactionId);
+        }
+      } catch (err) {
+        console.error("Slip OCR failed:", err);
+      } finally {
+        setIsOcrProcessing(false);
+      }
     }
-  }, [remaining]);
+  }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -88,7 +86,7 @@ export function PaymentModal({
       "application/pdf": [".pdf"],
     },
     maxFiles: 1,
-    maxSize: 10 * 1024 * 1024, // 10MB
+    maxSize: 5 * 1024 * 1024,
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -101,7 +99,7 @@ export function PaymentModal({
     }
 
     if (amountNum > remaining) {
-      setError("Payment exceeds remaining balance");
+      setError("Settlement exceeds remaining balance");
       return;
     }
 
@@ -113,48 +111,44 @@ export function PaymentModal({
       formData.append("amount", amount);
       formData.append("date", date);
       if (notes) formData.append("notes", notes);
+      if (transactionId) formData.append("transactionId", transactionId);
       if (slip) formData.append("slip", slip);
 
-      const response = await fetch(`/api/invoices/${invoice.id}/payments`, {
+      const response = await fetch(`/api/invoices/${invoice.id}/settlements`, {
         method: "POST",
         body: formData,
       });
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || "Failed to add payment");
+        if (response.status === 409) {
+          // Duplicate transaction
+          throw new Error(data.message || "This transaction has already been recorded");
+        }
+        throw new Error(data.error || "Failed to add settlement");
       }
 
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add payment");
+      setError(err instanceof Error ? err.message : "Failed to add settlement");
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const formatCurrency = (num: number) => {
-    return new Intl.NumberFormat("ms-MY", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(num);
   };
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
       />
 
-      {/* Modal */}
-      <div className="relative z-10 w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+      <div className="relative z-10 w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900">Add Payment</h2>
+            <h2 className="text-xl font-semibold text-slate-900">Add Settlement</h2>
             <p className="text-sm text-slate-500">
               Invoice: {invoice.invoiceNumber || invoice.fileName}
             </p>
@@ -170,30 +164,64 @@ export function PaymentModal({
         {/* Summary */}
         <div className="mt-4 grid grid-cols-3 gap-4 rounded-xl bg-slate-50 p-4">
           <div className="text-center">
-            <p className="text-xs text-slate-500">Total</p>
+            <p className="text-xs text-slate-500">Total Owed</p>
             <p className="font-semibold text-slate-900">
-              RM {formatCurrency(invoice.totalAmount)}
+              RM {invoice.totalAmount.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
             </p>
           </div>
           <div className="text-center">
-            <p className="text-xs text-slate-500">Paid</p>
+            <p className="text-xs text-slate-500">Settled</p>
             <p className="font-semibold text-emerald-600">
-              RM {formatCurrency(invoice.paidAmount)}
+              RM {invoice.paidAmount.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
             </p>
           </div>
           <div className="text-center">
-            <p className="text-xs text-slate-500">Remaining</p>
+            <p className="text-xs text-slate-500">Outstanding</p>
             <p className="font-semibold text-amber-600">
-              RM {formatCurrency(remaining)}
+              RM {remaining.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
             </p>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-          {/* Slip Upload - First so OCR can auto-fill */}
+          <Input
+            id="amount"
+            type="number"
+            step="0.01"
+            min="0.01"
+            max={remaining}
+            label="Settlement Amount (RM)"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+          />
+
+          <Input
+            id="date"
+            type="date"
+            label="Payment Date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            required
+          />
+
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700">
-              Payment Slip (auto-extracts amount & date)
+              Notes (optional)
+            </label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="flex w-full rounded-lg border-2 border-slate-200 bg-white px-4 py-2 text-base transition-colors placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:border-transparent"
+              placeholder="Payment reference, transaction ID..."
+            />
+          </div>
+
+          {/* Slip Upload */}
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+              Payment Slip (recommended)
             </label>
             <div
               {...getRootProps()}
@@ -207,9 +235,9 @@ export function PaymentModal({
             >
               <input {...getInputProps()} />
               {isOcrProcessing ? (
-                <div className="flex flex-col items-center gap-2">
+                <div className="flex flex-col items-center gap-1">
                   <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
-                  <p className="text-sm text-slate-600">Reading slip...</p>
+                  <p className="text-sm text-slate-600">Extracting slip data...</p>
                 </div>
               ) : slip ? (
                 <div className="flex items-center justify-center gap-2">
@@ -220,7 +248,8 @@ export function PaymentModal({
                     onClick={(e) => {
                       e.stopPropagation();
                       setSlip(null);
-                      setOcrResult(null);
+                      setSlipOcrResults(null);
+                      setTransactionId("");
                     }}
                     className="rounded-full p-1 hover:bg-slate-200"
                   >
@@ -233,84 +262,49 @@ export function PaymentModal({
                   <p className="text-sm text-slate-500">
                     Drop payment slip or click to upload
                   </p>
-                  <p className="text-xs text-slate-400">
-                    OCR will extract amount & date automatically
-                  </p>
                 </div>
               )}
             </div>
           </div>
 
-          {/* OCR Result Badge */}
-          {ocrResult && (ocrResult.amount || ocrResult.date) && (
-            <div className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-              <ScanText className="h-4 w-4" />
-              <span>
-                Extracted: 
-                {ocrResult.amount && ` RM ${formatCurrency(ocrResult.amount)}`}
-                {ocrResult.amount && ocrResult.date && " • "}
-                {ocrResult.date && ` ${ocrResult.date}`}
-              </span>
+          {slipOcrResults && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <ScanText className="h-4 w-4" /> Extracted from Slip (Editable)
+              </h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="text-xs text-slate-500">Amount (RM)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="mt-1 w-full rounded border px-2 py-1 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">Date</label>
+                  <input
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="mt-1 w-full rounded border px-2 py-1 text-sm"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs text-slate-500">Transaction ID (for duplicate check)</label>
+                  <input
+                    type="text"
+                    value={transactionId}
+                    onChange={(e) => setTransactionId(e.target.value)}
+                    placeholder="e.g., 2024123456789"
+                    className="mt-1 w-full rounded border px-2 py-1 text-sm font-mono"
+                  />
+                </div>
+              </div>
             </div>
           )}
-
-          {/* Amount */}
-          <div>
-            <label
-              htmlFor="amount"
-              className="mb-1.5 block text-sm font-medium text-slate-700"
-            >
-              Payment Amount (RM)
-            </label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
-                RM
-              </span>
-              <input
-                id="amount"
-                type="number"
-                step="0.01"
-                min="0.01"
-                max={remaining}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="w-full rounded-lg border-2 border-slate-200 py-2.5 pl-12 pr-4 text-right text-lg font-semibold focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                required
-              />
-            </div>
-          </div>
-
-          {/* Date */}
-          <div>
-            <label
-              htmlFor="date"
-              className="mb-1.5 block text-sm font-medium text-slate-700"
-            >
-              Payment Date
-            </label>
-            <input
-              id="date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full rounded-lg border-2 border-slate-200 px-4 py-2.5 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              required
-            />
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
-              Notes (optional)
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              className="w-full rounded-lg border-2 border-slate-200 px-4 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              placeholder="Payment reference, notes..."
-            />
-          </div>
 
           {error && (
             <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
@@ -338,7 +332,7 @@ export function PaymentModal({
                   Processing...
                 </>
               ) : (
-                "Add Payment"
+                "Add Settlement"
               )}
             </Button>
           </div>
@@ -347,3 +341,4 @@ export function PaymentModal({
     </div>
   );
 }
+

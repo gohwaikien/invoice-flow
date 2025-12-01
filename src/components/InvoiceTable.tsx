@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { format } from "date-fns";
-import { Eye, Plus, FileText, ExternalLink, Trash2, Loader2 } from "lucide-react";
+import { Eye, Plus, FileText, ExternalLink, Trash2, Loader2, Banknote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { PaymentModal } from "./PaymentModal";
+import { SettlementModal } from "./SettlementModal";
 import { InvoiceDetailModal } from "./InvoiceDetailModal";
 
 export interface Payment {
@@ -16,6 +16,17 @@ export interface Payment {
   slipName: string | null;
   notes: string | null;
   paidBy: { name: string | null; email: string | null };
+}
+
+export interface Settlement {
+  id: string;
+  amount: number;
+  date: string;
+  slipUrl: string | null;
+  slipName: string | null;
+  notes: string | null;
+  transactionId: string | null;
+  settledBy: { name: string | null; email: string | null };
 }
 
 export interface Invoice {
@@ -31,18 +42,19 @@ export interface Invoice {
   uploader: { name: string | null; email: string | null };
   recipient: { name: string | null; email: string | null } | null;
   payments: Payment[];
+  settlements?: Settlement[];
   createdAt: string;
 }
 
 interface InvoiceTableProps {
   invoices: Invoice[];
-  userRole: "SUPPLIER" | "BUSINESS";
+  userRole: "ADMIN" | "SUPPLIER" | "BUSINESS";
   onRefresh: () => void;
 }
 
 export function InvoiceTable({ invoices, userRole, onRefresh }: InvoiceTableProps) {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showSettlementModal, setShowSettlementModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -126,7 +138,7 @@ export function InvoiceTable({ invoices, userRole, onRefresh }: InvoiceTableProp
                   Total Amount
                 </th>
                 <th className="px-6 py-4 text-right text-sm font-semibold text-slate-700">
-                  Paid
+                  Settled
                 </th>
                 <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
                   Status
@@ -213,17 +225,17 @@ export function InvoiceTable({ invoices, userRole, onRefresh }: InvoiceTableProp
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
-                      {userRole === "BUSINESS" && invoice.status !== "COMPLETED" && (
+                      {(userRole === "BUSINESS" || userRole === "ADMIN") && invoice.status !== "COMPLETED" && (
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => {
                             setSelectedInvoice(invoice);
-                            setShowPaymentModal(true);
+                            setShowSettlementModal(true);
                           }}
                         >
-                          <Plus className="mr-1 h-4 w-4" />
-                          Pay
+                          <Banknote className="mr-1 h-4 w-4" />
+                          Settle
                         </Button>
                       )}
                       {userRole === "SUPPLIER" && (
@@ -251,17 +263,17 @@ export function InvoiceTable({ invoices, userRole, onRefresh }: InvoiceTableProp
         </div>
       </div>
 
-      {/* Payment Modal */}
-      {selectedInvoice && showPaymentModal && (
-        <PaymentModal
+      {/* Settlement Modal */}
+      {selectedInvoice && showSettlementModal && (
+        <SettlementModal
           invoice={selectedInvoice}
-          isOpen={showPaymentModal}
+          isOpen={showSettlementModal}
           onClose={() => {
-            setShowPaymentModal(false);
+            setShowSettlementModal(false);
             setSelectedInvoice(null);
           }}
           onSuccess={() => {
-            setShowPaymentModal(false);
+            setShowSettlementModal(false);
             setSelectedInvoice(null);
             onRefresh();
           }}

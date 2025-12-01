@@ -15,6 +15,7 @@ import {
   Clock,
   CheckCircle,
   Shield,
+  Code,
 } from "lucide-react";
 import Link from "next/link";
 import { signOut } from "next-auth/react";
@@ -22,6 +23,8 @@ import { Button } from "@/components/ui/button";
 import { InvoiceUpload } from "@/components/InvoiceUpload";
 import { InvoiceTable, Invoice } from "@/components/InvoiceTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SupplierPaymentsList } from "@/components/SupplierPaymentsList";
+import { AddPaymentModal } from "@/components/AddPaymentModal";
 
 interface DashboardClientProps {
   session: Session;
@@ -31,9 +34,16 @@ export function DashboardClient({ session }: DashboardClientProps) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
   const [filter, setFilter] = useState<"all" | "PENDING" | "PARTIAL" | "COMPLETED">("all");
 
   const userRole = session.user.role as "ADMIN" | "SUPPLIER" | "BUSINESS";
+  
+  // Admin can switch between Supplier and Business views
+  const [activeView, setActiveView] = useState<"SUPPLIER" | "BUSINESS">("SUPPLIER");
+  const effectiveRole = userRole === "ADMIN" ? activeView : userRole;
+
+  const [paymentsKey, setPaymentsKey] = useState(0); // To trigger refresh
 
   const fetchInvoices = useCallback(async () => {
     setIsLoading(true);
@@ -89,17 +99,46 @@ export function DashboardClient({ session }: DashboardClientProps) {
                 InvoiceFlow
               </h1>
               <div className="flex items-center gap-2">
-                {userRole === "SUPPLIER" ? (
+                {effectiveRole === "SUPPLIER" ? (
                   <Truck className="h-3.5 w-3.5 text-slate-400" />
                 ) : (
                   <Building2 className="h-3.5 w-3.5 text-slate-400" />
                 )}
-                <span className="text-xs text-slate-500">{userRole}</span>
+                <span className="text-xs text-slate-500">
+                  {userRole === "ADMIN" ? `Admin (${effectiveRole})` : userRole}
+                </span>
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Admin View Switcher */}
+            {userRole === "ADMIN" && (
+              <div className="flex items-center rounded-lg border border-slate-200 bg-white p-1">
+                <button
+                  onClick={() => setActiveView("SUPPLIER")}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    activeView === "SUPPLIER"
+                      ? "bg-blue-100 text-blue-700"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  <Truck className="h-4 w-4" />
+                  <span className="hidden sm:inline">Supplier</span>
+                </button>
+                <button
+                  onClick={() => setActiveView("BUSINESS")}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    activeView === "BUSINESS"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  <Building2 className="h-4 w-4" />
+                  <span className="hidden sm:inline">Business</span>
+                </button>
+              </div>
+            )}
             {/* Admin Link */}
             {userRole === "ADMIN" && (
               <Link href="/admin">
@@ -109,6 +148,13 @@ export function DashboardClient({ session }: DashboardClientProps) {
                 </Button>
               </Link>
             )}
+            {/* API Docs Link */}
+            <Link href="/api-docs">
+              <Button variant="outline" size="sm" className="gap-2">
+                <Code className="h-4 w-4 text-violet-500" />
+                <span className="hidden sm:inline">API</span>
+              </Button>
+            </Link>
             {/* User info */}
             <div className="hidden items-center gap-3 sm:flex">
               {session.user.image && (
@@ -156,7 +202,7 @@ export function DashboardClient({ session }: DashboardClientProps) {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-500">
-                {userRole === "SUPPLIER" ? "Total Receivable" : "Total Payable"}
+                {effectiveRole === "SUPPLIER" ? "Total Receivable" : "Total Payable"}
               </CardTitle>
               <DollarSign className="h-5 w-5 text-slate-400" />
             </CardHeader>
@@ -170,7 +216,7 @@ export function DashboardClient({ session }: DashboardClientProps) {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-500">
-                {userRole === "SUPPLIER" ? "Amount Received" : "Amount Paid"}
+                {effectiveRole === "SUPPLIER" ? "Amount Received" : "Amount Paid"}
               </CardTitle>
               <CheckCircle className="h-5 w-5 text-emerald-500" />
             </CardHeader>
@@ -196,51 +242,69 @@ export function DashboardClient({ session }: DashboardClientProps) {
           </Card>
         </div>
 
-        {/* Actions Bar */}
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <Filter className="h-5 w-5 text-slate-400" />
-            <div className="flex rounded-lg border border-slate-200 bg-white p-1">
-              {["all", "PENDING", "PARTIAL", "COMPLETED"].map((status) => (
-                <button
-                  key={status}
-                  onClick={() => setFilter(status as typeof filter)}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                    filter === status
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  {status === "all" ? "All" : status.charAt(0) + status.slice(1).toLowerCase()}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={fetchInvoices} size="icon">
-              <RefreshCcw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-            </Button>
-            {userRole === "SUPPLIER" && (
-              <Button onClick={() => setShowUploadModal(true)}>
+        {/* Supplier Payments View */}
+        {effectiveRole === "SUPPLIER" && (
+          <>
+            <div className="mb-6 flex justify-end">
+              <Button onClick={() => setShowAddPaymentModal(true)}>
                 <Plus className="mr-2 h-4 w-4" />
-                Upload Invoice
+                Add Payment
               </Button>
-            )}
-          </div>
-        </div>
+            </div>
+            <SupplierPaymentsList
+              key={paymentsKey}
+              onRefresh={() => {
+                setPaymentsKey((k) => k + 1);
+                fetchInvoices();
+              }}
+            />
+          </>
+        )}
 
-        {/* Invoice Table */}
-        {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-          </div>
-        ) : (
-          <InvoiceTable
-            invoices={invoices}
-            userRole={userRole}
-            onRefresh={fetchInvoices}
-          />
+        {/* Invoice View (for Business only) */}
+        {effectiveRole === "BUSINESS" && (
+          <>
+            {/* Actions Bar */}
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Filter className="h-5 w-5 text-slate-400" />
+                <div className="flex rounded-lg border border-slate-200 bg-white p-1">
+                  {["all", "PENDING", "PARTIAL", "COMPLETED"].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() => setFilter(status as typeof filter)}
+                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                        filter === status
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {status === "all" ? "All" : status.charAt(0) + status.slice(1).toLowerCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={fetchInvoices} size="icon">
+                  <RefreshCcw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
+            </div>
+
+            {/* Invoice Table */}
+            {isLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+              </div>
+            ) : (
+              <InvoiceTable
+                invoices={invoices}
+                userRole={effectiveRole}
+                onRefresh={fetchInvoices}
+              />
+            )}
+          </>
         )}
       </main>
 
@@ -284,6 +348,13 @@ export function DashboardClient({ session }: DashboardClientProps) {
           </div>
         </div>
       )}
+
+      {/* Add Payment Modal */}
+      <AddPaymentModal
+        isOpen={showAddPaymentModal}
+        onClose={() => setShowAddPaymentModal(false)}
+        onSuccess={() => setPaymentsKey((k) => k + 1)}
+      />
     </div>
   );
 }

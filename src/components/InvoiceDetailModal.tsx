@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { format } from "date-fns";
-import { X, FileText, ExternalLink, Download } from "lucide-react";
+import { X, FileText, ExternalLink, Download, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { Invoice } from "./InvoiceTable";
@@ -11,29 +11,36 @@ interface InvoiceDetailModalProps {
   invoice: Invoice;
   isOpen: boolean;
   onClose: () => void;
-  userRole: "SUPPLIER" | "BUSINESS";
+  onRefresh?: () => void;
+  userRole: "ADMIN" | "SUPPLIER" | "BUSINESS";
 }
 
 export function InvoiceDetailModal({
   invoice,
   isOpen,
   onClose,
+  onRefresh,
   userRole,
 }: InvoiceDetailModalProps) {
   const [loadingFile, setLoadingFile] = useState<string | null>(null);
+  const [deletingSettlementId, setDeletingSettlementId] = useState<string | null>(null);
 
-  const viewFile = async (fileKey: string) => {
-    setLoadingFile(fileKey);
-    try {
-      const response = await fetch(`/api/files/${encodeURIComponent(fileKey)}`);
-      const data = await response.json();
-      if (data.url) {
-        window.open(data.url, "_blank");
-      }
-    } catch (error) {
-      console.error("Error getting file URL:", error);
-    } finally {
-      setLoadingFile(null);
+  const viewFile = (fileUrl: string) => {
+    // If it's already a full URL (GCS), open directly
+    if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://")) {
+      window.open(fileUrl, "_blank", "noopener,noreferrer");
+    } else {
+      // Legacy: fetch signed URL from API
+      setLoadingFile(fileUrl);
+      fetch(`/api/files/${encodeURIComponent(fileUrl)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.url) {
+            window.open(data.url, "_blank", "noopener,noreferrer");
+          }
+        })
+        .catch((err) => console.error("Error getting file URL:", err))
+        .finally(() => setLoadingFile(null));
     }
   };
 
@@ -42,6 +49,33 @@ export function InvoiceDetailModal({
       style: "currency",
       currency: "MYR",
     }).format(amount);
+  };
+
+  const handleDeleteSettlement = async (settlementId: string) => {
+    if (!confirm("Are you sure you want to delete this settlement?")) {
+      return;
+    }
+
+    setDeletingSettlementId(settlementId);
+    try {
+      const response = await fetch(`/api/settlements/${settlementId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        alert(data.error || "Failed to delete settlement");
+        return;
+      }
+
+      onRefresh?.();
+      onClose();
+    } catch (error) {
+      console.error("Error deleting settlement:", error);
+      alert("Failed to delete settlement");
+    } finally {
+      setDeletingSettlementId(null);
+    }
   };
 
   const getStatusBadge = (status: Invoice["status"]) => {
@@ -108,10 +142,10 @@ export function InvoiceDetailModal({
             </div>
             <div className="mt-2 flex justify-between text-sm">
               <span className="text-slate-600">
-                Paid: <span className="font-medium text-emerald-600">{formatCurrency(invoice.paidAmount)}</span>
+                Settled: <span className="font-medium text-emerald-600">{formatCurrency(invoice.paidAmount)}</span>
               </span>
               <span className="text-slate-600">
-                Total: <span className="font-medium">{formatCurrency(invoice.totalAmount)}</span>
+                Total Owed: <span className="font-medium">{formatCurrency(invoice.totalAmount)}</span>
               </span>
             </div>
           </div>
@@ -205,21 +239,17 @@ export function InvoiceDetailModal({
             View Invoice Document
           </Button>
 
-          {/* Payments */}
-          <div>
-            <h3 className="mb-4 text-lg font-semibold text-slate-900">
-              Payment History
-            </h3>
-            {invoice.payments.length === 0 ? (
-              <p className="text-center text-sm text-slate-500">
-                No payments recorded yet
-              </p>
-            ) : (
+          {/* Supplier Payments - Only show if supplier has payments */}
+          {invoice.payments && invoice.payments.length > 0 && (
+            <div className="mb-6">
+              <h3 className="mb-4 text-lg font-semibold text-slate-900">
+                Supplier Payments (On Behalf)
+              </h3>
               <div className="space-y-3">
                 {invoice.payments.map((payment) => (
                   <div
                     key={payment.id}
-                    className="flex items-center justify-between rounded-xl border border-slate-200 p-4"
+                    className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50/50 p-4"
                   >
                     <div>
                       <p className="font-medium text-slate-900">
@@ -246,6 +276,75 @@ export function InvoiceDetailModal({
                         Slip
                       </Button>
                     )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Business Settlements */}
+          <div>
+            <h3 className="mb-4 text-lg font-semibold text-slate-900">
+              Settlement History
+            </h3>
+            {!invoice.settlements || invoice.settlements.length === 0 ? (
+              <p className="text-center text-sm text-slate-500 py-4">
+                No settlements recorded yet
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {invoice.settlements.map((settlement) => (
+                  <div
+                    key={settlement.id}
+                    className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/50 p-4"
+                  >
+                    <div className="flex-1">
+                      <p className="font-medium text-slate-900">
+                        {formatCurrency(settlement.amount)}
+                      </p>
+                      <p className="text-sm text-slate-500">
+                        {format(new Date(settlement.date), "MMM d, yyyy")} •{" "}
+                        {settlement.settledBy.name || settlement.settledBy.email}
+                      </p>
+                      {settlement.transactionId && (
+                        <p className="mt-1 text-xs text-slate-600 font-mono">
+                          TX ID: {settlement.transactionId}
+                        </p>
+                      )}
+                      {settlement.notes && (
+                        <p className="mt-1 text-sm text-slate-600">
+                          {settlement.notes}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      {settlement.slipUrl && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => viewFile(settlement.slipUrl!)}
+                          disabled={loadingFile === settlement.slipUrl}
+                        >
+                          <Download className="mr-1 h-4 w-4" />
+                          Slip
+                        </Button>
+                      )}
+                      {(userRole === "BUSINESS" || userRole === "ADMIN") && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteSettlement(settlement.id)}
+                          disabled={deletingSettlementId === settlement.id}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        >
+                          {deletingSettlementId === settlement.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

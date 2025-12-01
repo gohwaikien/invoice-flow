@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { uploadToS3, generateFileKey } from "@/lib/s3";
+import { uploadFile, generateFileKey } from "@/lib/storage";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -17,10 +17,10 @@ export async function GET(request: NextRequest) {
     let whereClause: Record<string, unknown> = {};
 
     if (session.user.role === "SUPPLIER") {
+      // Suppliers see only their own uploaded invoices
       whereClause.uploaderId = session.user.id;
-    } else if (session.user.role === "BUSINESS") {
-      whereClause.recipientId = session.user.id;
     }
+    // BUSINESS and ADMIN see ALL invoices (no filter)
 
     if (status) {
       whereClause.status = status;
@@ -38,6 +38,14 @@ export async function GET(request: NextRequest) {
         payments: {
           include: {
             paidBy: {
+              select: { name: true, email: true },
+            },
+          },
+          orderBy: { date: "desc" },
+        },
+        settlements: {
+          include: {
+            settledBy: {
               select: { name: true, email: true },
             },
           },
@@ -89,9 +97,9 @@ export async function POST(request: NextRequest) {
     // Convert file to buffer
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // Upload to S3 (original PDF/image is stored)
+    // Upload to GCS (original PDF/image is stored)
     const fileKey = generateFileKey("invoices", file.name);
-    await uploadToS3(buffer, fileKey, file.type);
+    const fileUrl = await uploadFile(buffer, fileKey, file.type);
 
     // Parse invoice date
     let invoiceDate: Date | null = null;
@@ -120,7 +128,7 @@ export async function POST(request: NextRequest) {
         invoiceDate: invoiceDate,
         recipientName: recipientName || null,
         totalAmount: totalAmount ? parseFloat(totalAmount) : 0,
-        fileUrl: fileKey,
+        fileUrl: fileUrl,
         fileName: file.name,
         ocrData: {
           invoiceNumber,
