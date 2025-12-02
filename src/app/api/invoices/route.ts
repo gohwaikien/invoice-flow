@@ -1,13 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { authenticateRequest } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { uploadFile, generateFileKey } from "@/lib/storage";
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Try API key authentication first, then session
+  const authResult = await authenticateRequest(request);
+  
+  let user;
+  if (authResult) {
+    user = authResult.user;
+  } else {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    user = session.user;
   }
 
   const { searchParams } = new URL(request.url);
@@ -16,9 +25,9 @@ export async function GET(request: NextRequest) {
   try {
     let whereClause: Record<string, unknown> = {};
 
-    if (session.user.role === "SUPPLIER") {
+    if (user.role === "SUPPLIER") {
       // Suppliers see only their own uploaded invoices
-      whereClause.uploaderId = session.user.id;
+      whereClause.uploaderId = user.id;
     }
     // BUSINESS and ADMIN see ALL invoices (no filter)
 
@@ -66,13 +75,21 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Try API key authentication first, then session
+  const authResult = await authenticateRequest(request);
+  
+  let user;
+  if (authResult) {
+    user = authResult.user;
+  } else {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    user = session.user;
   }
 
-  if (session.user.role !== "SUPPLIER") {
+  if (user.role !== "SUPPLIER") {
     return NextResponse.json(
       { error: "Only suppliers can upload invoices" },
       { status: 403 }
@@ -136,7 +153,7 @@ export async function POST(request: NextRequest) {
           invoiceDate: invoiceDateStr,
           totalAmount: totalAmount ? parseFloat(totalAmount) : 0,
         },
-        uploaderId: session.user.id,
+        uploaderId: user.id,
         recipientId,
       },
       include: {
