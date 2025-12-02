@@ -1,6 +1,7 @@
 FROM node:20-alpine AS base
 
 # Install dependencies only when needed
+# Rebuild triggered: 2025-12-02
 FROM base AS deps
 RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
