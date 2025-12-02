@@ -172,7 +172,7 @@ async function main() {
   let successCount = 0;
   let errorCount = 0;
 
-  for (let i = 0; i < Math.min(files.length, 10); i++) {  // Start with first 10 for testing
+  for (let i = 0; i < files.length; i++) {  // Upload all invoices
     const file = files[i];
     const filePath = path.join(INVOICES_DIR, file);
     

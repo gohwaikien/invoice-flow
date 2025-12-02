@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { authenticateRequest } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { uploadFile, generateFileKey } from "@/lib/storage";
+import { extractInvoiceData } from "@/lib/ocr";
 
 export async function GET(request: NextRequest) {
   // Try API key authentication first, then session
@@ -118,10 +119,29 @@ export async function POST(request: NextRequest) {
     const fileKey = generateFileKey("invoices", file.name);
     const fileUrl = await uploadFile(buffer, fileKey, file.type);
 
+    // If no OCR data provided, extract it automatically
+    let ocrExtractedNumber = invoiceNumber;
+    let ocrExtractedName = recipientName;
+    let ocrExtractedDate = invoiceDateStr;
+    let ocrExtractedAmount = totalAmount;
+
+    if (!invoiceNumber || !totalAmount) {
+      try {
+        const ocrResult = await extractInvoiceData(buffer, file.type, file.name);
+        ocrExtractedNumber = ocrExtractedNumber || ocrResult.invoiceNumber;
+        ocrExtractedName = ocrExtractedName || ocrResult.recipientName;
+        ocrExtractedDate = ocrExtractedDate || ocrResult.invoiceDate;
+        ocrExtractedAmount = ocrExtractedAmount || (ocrResult.totalAmount ? ocrResult.totalAmount.toString() : null);
+      } catch (error) {
+        console.error("OCR extraction failed:", error);
+        // Continue without OCR data
+      }
+    }
+
     // Parse invoice date
     let invoiceDate: Date | null = null;
-    if (invoiceDateStr) {
-      invoiceDate = new Date(invoiceDateStr);
+    if (ocrExtractedDate) {
+      invoiceDate = new Date(ocrExtractedDate);
       if (isNaN(invoiceDate.getTime())) {
         invoiceDate = null;
       }
@@ -138,20 +158,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Create invoice record with user-edited data
+    // Create invoice record with OCR-extracted data
     const invoice = await prisma.invoice.create({
       data: {
-        invoiceNumber: invoiceNumber || null,
+        invoiceNumber: ocrExtractedNumber || null,
         invoiceDate: invoiceDate,
-        recipientName: recipientName || null,
-        totalAmount: totalAmount ? parseFloat(totalAmount) : 0,
+        recipientName: ocrExtractedName || null,
+        totalAmount: ocrExtractedAmount ? parseFloat(ocrExtractedAmount) : 0,
         fileUrl: fileUrl,
         fileName: file.name,
         ocrData: {
-          invoiceNumber,
-          recipientName,
-          invoiceDate: invoiceDateStr,
-          totalAmount: totalAmount ? parseFloat(totalAmount) : 0,
+          invoiceNumber: ocrExtractedNumber,
+          recipientName: ocrExtractedName,
+          invoiceDate: ocrExtractedDate,
+          totalAmount: ocrExtractedAmount ? parseFloat(ocrExtractedAmount) : 0,
         },
         uploaderId: user.id,
         recipientId,
