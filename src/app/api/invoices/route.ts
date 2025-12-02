@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
         const ocrResult = await extractInvoiceData(buffer, file.type, file.name);
         ocrExtractedNumber = ocrExtractedNumber || ocrResult.invoiceNumber;
         ocrExtractedName = ocrExtractedName || ocrResult.recipientName;
-        ocrExtractedDate = ocrExtractedDate || ocrResult.invoiceDate;
+        ocrExtractedDate = ocrExtractedDate || (ocrResult.invoiceDate ? ocrResult.invoiceDate.toISOString() : null);
         ocrExtractedAmount = ocrExtractedAmount || (ocrResult.totalAmount ? ocrResult.totalAmount.toString() : null);
       } catch (error) {
         console.error("OCR extraction failed:", error);
