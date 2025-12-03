@@ -61,7 +61,7 @@ export async function PUT(
 
   try {
     const body = await request.json();
-    const { amount, notes, date, invoiceId } = body;
+    const { amount, notes, date } = body;
 
     // Verify payment exists and belongs to user
     const payment = await prisma.payment.findUnique({
@@ -87,7 +87,6 @@ export async function PUT(
         amount: newAmount,
         notes: notes !== undefined ? notes : payment.notes,
         date: date ? new Date(date) : payment.date,
-        invoiceId: invoiceId !== undefined ? invoiceId : payment.invoiceId,
       },
       include: {
         invoice: {
