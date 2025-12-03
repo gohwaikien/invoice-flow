@@ -2,8 +2,9 @@ import { Storage } from "@google-cloud/storage";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 
-// Use Google Cloud Storage in production, local storage in development
-const USE_GCS = process.env.GCS_BUCKET_NAME ? true : false;
+// Use Google Cloud Storage only in production (not localhost)
+const IS_PRODUCTION = process.env.NODE_ENV === "production" || process.env.VERCEL || process.env.K_SERVICE;
+const USE_GCS = IS_PRODUCTION && process.env.GCS_BUCKET_NAME ? true : false;
 const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME || "";
 
 // Local storage path for development
@@ -12,7 +13,23 @@ const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 // Initialize GCS client (uses default credentials in Cloud Run)
 let storage: Storage | null = null;
 if (USE_GCS) {
-  storage = new Storage();
+  try {
+    storage = new Storage();
+  } catch (e) {
+    console.warn("GCS initialization failed, falling back to local storage");
+  }
+}
+
+async function saveLocally(file: Buffer, key: string): Promise<string> {
+  await mkdir(UPLOAD_DIR, { recursive: true });
+  
+  const filePath = path.join(UPLOAD_DIR, key);
+  const fileDir = path.dirname(filePath);
+  await mkdir(fileDir, { recursive: true });
+  
+  await writeFile(filePath, file);
+  
+  return `/uploads/${key}`;
 }
 
 export async function uploadFile(
@@ -36,21 +53,14 @@ export async function uploadFile(
       // Return the GCS URL
       return `https://storage.googleapis.com/${GCS_BUCKET_NAME}/${key}`;
     } catch (error) {
-      console.error("Error uploading to GCS:", error);
-      throw error;
+      console.error("Error uploading to GCS, falling back to local:", error);
+      // Fallback to local storage if GCS fails
+      return saveLocally(file, key);
     }
   } else {
     // Use local storage for development
     try {
-      await mkdir(UPLOAD_DIR, { recursive: true });
-      
-      const filePath = path.join(UPLOAD_DIR, key);
-      const fileDir = path.dirname(filePath);
-      await mkdir(fileDir, { recursive: true });
-      
-      await writeFile(filePath, file);
-      
-      return `/uploads/${key}`;
+      return await saveLocally(file, key);
     } catch (error) {
       console.error("Error saving file locally:", error);
       throw error;

@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Filter,
   Calendar,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,6 +89,7 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
   const [statusFilter, setStatusFilter] = useState<"all" | "unlinked" | "linked" | "settled">("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
 
   const fetchPayments = useCallback(async () => {
@@ -190,9 +192,20 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
         if (paymentDate > toDate) return false;
       }
 
+      // Search by invoice name/number
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const invoiceName = p.invoice?.invoiceNumber?.toLowerCase() || "";
+        const invoiceFileName = p.invoice?.fileName?.toLowerCase() || "";
+        const notes = p.notes?.toLowerCase() || "";
+        if (!invoiceName.includes(query) && !invoiceFileName.includes(query) && !notes.includes(query)) {
+          return false;
+        }
+      }
+
       return true;
     });
-  }, [payments, statusFilter, dateFrom, dateTo]);
+  }, [payments, statusFilter, dateFrom, dateTo, searchQuery]);
 
   // Paginate filtered payments
   const paginatedPayments = useMemo(() => {
@@ -205,15 +218,16 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, dateFrom, dateTo, pageSize]);
+  }, [statusFilter, dateFrom, dateTo, searchQuery, pageSize]);
 
   const clearFilters = () => {
     setStatusFilter("all");
     setDateFrom("");
     setDateTo("");
+    setSearchQuery("");
   };
 
-  const hasActiveFilters = statusFilter !== "all" || dateFrom || dateTo;
+  const hasActiveFilters = statusFilter !== "all" || dateFrom || dateTo || searchQuery;
 
   if (isLoading) {
     return (
@@ -228,6 +242,28 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
       {/* Filter Bar */}
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
+          {/* Search */}
+          <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-[300px]">
+            <div className="relative w-full">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                type="text"
+                placeholder="Search invoice name..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Status Filter */}
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-slate-400" />
