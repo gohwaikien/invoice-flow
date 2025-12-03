@@ -136,6 +136,12 @@ model Payment {
   paidById String
   paidBy   User   @relation(fields: [paidById], references: [id])
 
+  // Direct settlements on this payment (when no invoice attached)
+  settlements Settlement[]
+
+  // Settlement tracking for payments without invoice
+  settledAmount Float @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -153,9 +159,12 @@ model Settlement {
   notes         String?
   transactionId String?  @unique // OCR extracted, used to prevent duplicates
 
-  // Which invoice this settlement is for
-  invoiceId String
-  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  // Settlement can be linked to either an invoice OR a payment directly
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
   // Who made the settlement (Business user)
   settledById String
@@ -165,5 +174,6 @@ model Settlement {
   updatedAt DateTime @updatedAt
 
   @@index([invoiceId])
+  @@index([paymentId])
   @@index([settledById])
 }

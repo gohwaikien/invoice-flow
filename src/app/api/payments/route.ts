@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
                 slipUrl: true,
                 slipName: true,
                 notes: true,
+                transactionId: true,
                 settledBy: {
                   select: { name: true, email: true },
                 },
@@ -51,6 +52,22 @@ export async function GET(request: NextRequest) {
               orderBy: { date: "desc" },
             },
           },
+        },
+        // Direct settlements on payment (when no invoice)
+        settlements: {
+          select: {
+            id: true,
+            amount: true,
+            date: true,
+            slipUrl: true,
+            slipName: true,
+            notes: true,
+            transactionId: true,
+            settledBy: {
+              select: { name: true, email: true },
+            },
+          },
+          orderBy: { date: "desc" },
         },
         paidBy: {
           select: {

@@ -29,6 +29,7 @@ interface Settlement {
   slipUrl: string | null;
   slipName: string | null;
   notes: string | null;
+  transactionId: string | null;
   settledBy: { name: string | null; email: string | null };
 }
 
@@ -38,6 +39,8 @@ interface Payment {
   date: string;
   notes: string | null;
   invoiceId: string | null;
+  settledAmount: number;
+  settlements: Settlement[];
   invoice: {
     id: string;
     invoiceNumber: string | null;
@@ -177,58 +180,177 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
           </div>
         ) : (
           <div className="space-y-3">
-            {unlinkedPayments.map((payment) => (
-              <div
-                key={payment.id}
-                className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-4"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-3">
-                    <p className="text-xl font-bold text-slate-900">
-                      RM {formatCurrency(payment.amount)}
-                    </p>
-                    <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-medium text-amber-800">
-                      Needs Invoice
-                    </span>
+            {unlinkedPayments.map((payment) => {
+              const settledAmount = payment.settledAmount || 0;
+              const progressPercent = (settledAmount / payment.amount) * 100;
+              const isFullySettled = settledAmount >= payment.amount;
+              const hasSettlements = payment.settlements && payment.settlements.length > 0;
+              const isExpanded = expandedPaymentId === payment.id;
+
+              return (
+                <div
+                  key={payment.id}
+                  className={`rounded-xl border ${
+                    isFullySettled
+                      ? "border-emerald-200 bg-emerald-50"
+                      : settledAmount > 0
+                      ? "border-blue-200 bg-blue-50"
+                      : "border-amber-200 bg-amber-50"
+                  }`}
+                >
+                  <div className="p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3">
+                          <p className="text-xl font-bold text-slate-900">
+                            RM {formatCurrency(payment.amount)}
+                          </p>
+                          {isFullySettled ? (
+                            <span className="rounded-full bg-emerald-200 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                              Fully Settled
+                            </span>
+                          ) : settledAmount > 0 ? (
+                            <span className="rounded-full bg-blue-200 px-2 py-0.5 text-xs font-medium text-blue-800">
+                              Partially Settled
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-medium text-amber-800">
+                              Needs Invoice / Settlement
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-sm text-slate-600">
+                          {format(new Date(payment.date), "dd MMM yyyy")}
+                        </p>
+                        {payment.notes && (
+                          <p className="mt-2 text-sm text-slate-700 italic">
+                            "{payment.notes}"
+                          </p>
+                        )}
+
+                        {/* Settlement Progress Bar (for payments with settlements) */}
+                        {settledAmount > 0 && (
+                          <div className="mt-3">
+                            <div className="flex items-center justify-between text-xs text-slate-600">
+                              <span>
+                                Settled: <span className="font-semibold text-emerald-600">RM {formatCurrency(settledAmount)}</span>
+                              </span>
+                              <span>
+                                of RM {formatCurrency(payment.amount)}
+                              </span>
+                            </div>
+                            <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  isFullySettled ? "bg-emerald-500" : "bg-blue-500"
+                                }`}
+                                style={{ width: `${Math.min(progressPercent, 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="ml-4 flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEdit(payment)}
+                          title="Edit"
+                        >
+                          <Pencil className="h-4 w-4 text-slate-500" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDelete(payment)}
+                          disabled={deletingId === payment.id}
+                          title="Delete"
+                        >
+                          {deletingId === payment.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          )}
+                        </Button>
+                        <Button onClick={() => handleAttachInvoice(payment)}>
+                          <Upload className="mr-2 h-4 w-4" />
+                          Attach Invoice
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Expand/Collapse for Settlements */}
+                    {hasSettlements && (
+                      <button
+                        onClick={() =>
+                          setExpandedPaymentId(isExpanded ? null : payment.id)
+                        }
+                        className="mt-3 flex w-full items-center justify-center gap-1 rounded-lg bg-white/50 py-2 text-sm font-medium text-slate-600 hover:bg-white/80 transition-colors"
+                      >
+                        {isExpanded ? (
+                          <>
+                            <ChevronUp className="h-4 w-4" />
+                            Hide Settlement History
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="h-4 w-4" />
+                            View {payment.settlements.length} Settlement{payment.settlements.length > 1 ? "s" : ""}
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {format(new Date(payment.date), "dd MMM yyyy")}
-                  </p>
-                  {payment.notes && (
-                    <p className="mt-2 text-sm text-slate-700 italic">
-                      "{payment.notes}"
-                    </p>
+
+                  {/* Settlements List (Expanded) */}
+                  {isExpanded && hasSettlements && (
+                    <div className="border-t border-slate-200 bg-white/50 p-4">
+                      <h4 className="mb-3 text-sm font-semibold text-slate-700">
+                        Settlement History
+                      </h4>
+                      <div className="space-y-2">
+                        {payment.settlements.map((settlement) => (
+                          <div
+                            key={settlement.id}
+                            className="flex items-center justify-between rounded-lg bg-white p-3 shadow-sm"
+                          >
+                            <div>
+                              <p className="font-medium text-slate-900">
+                                RM {formatCurrency(settlement.amount)}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {format(new Date(settlement.date), "dd MMM yyyy")} •{" "}
+                                {settlement.settledBy.name || settlement.settledBy.email}
+                              </p>
+                              {settlement.transactionId && (
+                                <p className="mt-0.5 text-xs text-slate-400 font-mono">
+                                  TX: {settlement.transactionId}
+                                </p>
+                              )}
+                              {settlement.notes && (
+                                <p className="mt-1 text-xs text-slate-600">
+                                  {settlement.notes}
+                                </p>
+                              )}
+                            </div>
+                            {settlement.slipUrl && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => window.open(settlement.slipUrl!, "_blank")}
+                              >
+                                <Download className="mr-1 h-4 w-4" />
+                                Slip
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
-                <div className="ml-4 flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleEdit(payment)}
-                    title="Edit"
-                  >
-                    <Pencil className="h-4 w-4 text-slate-500" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleDelete(payment)}
-                    disabled={deletingId === payment.id}
-                    title="Delete"
-                  >
-                    {deletingId === payment.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    )}
-                  </Button>
-                  <Button onClick={() => handleAttachInvoice(payment)}>
-                    <Upload className="mr-2 h-4 w-4" />
-                    Attach Invoice
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

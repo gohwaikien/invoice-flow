@@ -24,10 +24,10 @@ export async function DELETE(
   const { id } = await params;
 
   try {
-    // Find settlement and related invoice
+    // Find settlement and related invoice/payment
     const settlement = await prisma.settlement.findUnique({
       where: { id },
-      include: { invoice: true },
+      include: { invoice: true, payment: true },
     });
 
     if (!settlement) {
@@ -42,29 +42,41 @@ export async function DELETE(
       );
     }
 
-    // Update invoice paid amount and status
-    const newPaidAmount = Math.max(0, settlement.invoice.paidAmount - settlement.amount);
-    let newStatus: "PENDING" | "PARTIAL" | "COMPLETED" = "PENDING";
+    // Delete settlement first
+    await prisma.settlement.delete({
+      where: { id },
+    });
 
-    if (newPaidAmount >= settlement.invoice.totalAmount) {
-      newStatus = "COMPLETED";
-    } else if (newPaidAmount > 0) {
-      newStatus = "PARTIAL";
-    }
+    // Update invoice paid amount and status if linked to invoice
+    if (settlement.invoice) {
+      const newPaidAmount = Math.max(0, settlement.invoice.paidAmount - settlement.amount);
+      let newStatus: "PENDING" | "PARTIAL" | "COMPLETED" = "PENDING";
 
-    // Delete settlement and update invoice in a transaction
-    await prisma.$transaction([
-      prisma.settlement.delete({
-        where: { id },
-      }),
-      prisma.invoice.update({
-        where: { id: settlement.invoiceId },
+      if (newPaidAmount >= settlement.invoice.totalAmount) {
+        newStatus = "COMPLETED";
+      } else if (newPaidAmount > 0) {
+        newStatus = "PARTIAL";
+      }
+
+      await prisma.invoice.update({
+        where: { id: settlement.invoiceId! },
         data: {
           paidAmount: newPaidAmount,
           status: newStatus,
         },
-      }),
-    ]);
+      });
+    }
+
+    // Update payment's settled amount if linked to payment
+    if (settlement.payment) {
+      const newSettledAmount = Math.max(0, settlement.payment.settledAmount - settlement.amount);
+      await prisma.payment.update({
+        where: { id: settlement.paymentId! },
+        data: {
+          settledAmount: newSettledAmount,
+        },
+      });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {
