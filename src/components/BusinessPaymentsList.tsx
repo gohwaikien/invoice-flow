@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { format } from "date-fns";
 import { useDropzone } from "react-dropzone";
 import {
@@ -16,8 +16,14 @@ import {
   ChevronUp,
   Download,
   CreditCard,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  Calendar,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface Settlement {
   id: string;
@@ -67,6 +73,17 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
   const [expandedPaymentId, setExpandedPaymentId] = useState<string | null>(null);
   const [settlingPayment, setSettlingPayment] = useState<Payment | null>(null);
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Filter state
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "partial" | "settled">("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [supplierFilter, setSupplierFilter] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+
   const fetchPayments = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -104,6 +121,69 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
     onRefresh?.();
   };
 
+  // Get unique supplier names for filter dropdown
+  const uniqueSuppliers = useMemo(() => {
+    const suppliers = new Set<string>();
+    payments.forEach((p) => {
+      if (p.paidBy.name) suppliers.add(p.paidBy.name);
+      else if (p.paidBy.email) suppliers.add(p.paidBy.email);
+    });
+    return Array.from(suppliers).sort();
+  }, [payments]);
+
+  // Filter payments
+  const filteredPayments = useMemo(() => {
+    return payments.filter((p) => {
+      // Status filter
+      if (statusFilter === "pending" && p.settledAmount > 0) return false;
+      if (statusFilter === "partial" && (p.settledAmount === 0 || p.settledAmount >= p.amount)) return false;
+      if (statusFilter === "settled" && p.settledAmount < p.amount) return false;
+
+      // Date filter
+      if (dateFrom) {
+        const paymentDate = new Date(p.date);
+        const fromDate = new Date(dateFrom);
+        if (paymentDate < fromDate) return false;
+      }
+      if (dateTo) {
+        const paymentDate = new Date(p.date);
+        const toDate = new Date(dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        if (paymentDate > toDate) return false;
+      }
+
+      // Supplier filter
+      if (supplierFilter) {
+        const supplierName = p.paidBy.name || p.paidBy.email || "";
+        if (supplierName !== supplierFilter) return false;
+      }
+
+      return true;
+    });
+  }, [payments, statusFilter, dateFrom, dateTo, supplierFilter]);
+
+  // Paginate filtered payments
+  const paginatedPayments = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredPayments.slice(startIndex, startIndex + pageSize);
+  }, [filteredPayments, currentPage, pageSize]);
+
+  const totalPages = Math.ceil(filteredPayments.length / pageSize);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, dateFrom, dateTo, supplierFilter, pageSize]);
+
+  const clearFilters = () => {
+    setStatusFilter("all");
+    setDateFrom("");
+    setDateTo("");
+    setSupplierFilter("");
+  };
+
+  const hasActiveFilters = statusFilter !== "all" || dateFrom || dateTo || supplierFilter;
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -112,39 +192,152 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
     );
   }
 
-  // Separate payments by settlement status
-  const unsettledPayments = payments.filter((p) => p.settledAmount < p.amount);
-  const settledPayments = payments.filter((p) => p.settledAmount >= p.amount);
-
   return (
-    <div className="space-y-8">
-      {/* Payments Pending Settlement */}
+    <div className="space-y-6">
+      {/* Filter Bar */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          {/* Status Filter */}
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-slate-400" />
+            <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+              {[
+                { value: "all", label: "All" },
+                { value: "pending", label: "Pending" },
+                { value: "partial", label: "Partial" },
+                { value: "settled", label: "Settled" },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setStatusFilter(option.value as typeof statusFilter)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    statusFilter === option.value
+                      ? "bg-white text-emerald-700 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Page Size & Toggle Filters */}
+          <div className="flex items-center gap-2">
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-emerald-500 focus:outline-none"
+            >
+              <option value={5}>5 per page</option>
+              <option value={10}>10 per page</option>
+              <option value={20}>20 per page</option>
+              <option value={50}>50 per page</option>
+            </select>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowFilters(!showFilters)}
+              className={showFilters ? "bg-emerald-50 text-emerald-700" : ""}
+            >
+              <Filter className="mr-1 h-4 w-4" />
+              Filters
+            </Button>
+            {hasActiveFilters && (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                <X className="mr-1 h-4 w-4" />
+                Clear
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Advanced Filters */}
+        {showFilters && (
+          <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-slate-100 pt-4">
+            <div className="flex-1 min-w-[150px]">
+              <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                <Calendar className="mr-1 inline h-3 w-3" />
+                From Date
+              </label>
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <div className="flex-1 min-w-[150px]">
+              <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                <Calendar className="mr-1 inline h-3 w-3" />
+                To Date
+              </label>
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <div className="flex-1 min-w-[200px]">
+              <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                <Search className="mr-1 inline h-3 w-3" />
+                Supplier
+              </label>
+              <select
+                value={supplierFilter}
+                onChange={(e) => setSupplierFilter(e.target.value)}
+                className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="">All Suppliers</option>
+                {uniqueSuppliers.map((supplier) => (
+                  <option key={supplier} value={supplier}>
+                    {supplier}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* Filter Summary */}
+        {hasActiveFilters && (
+          <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+            <span>Showing {filteredPayments.length} of {payments.length} payments</span>
+          </div>
+        )}
+      </div>
+
+      {/* Payments List */}
       <div>
         <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900">
           <DollarSign className="h-5 w-5 text-amber-500" />
-          Payments Pending Settlement ({unsettledPayments.length})
+          Payments ({filteredPayments.length})
         </h3>
 
-        {unsettledPayments.length === 0 ? (
+        {paginatedPayments.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-slate-200 p-8 text-center">
             <Check className="mx-auto h-12 w-12 text-emerald-400" />
             <p className="mt-4 text-slate-500">
-              All payments have been settled!
+              {hasActiveFilters ? "No payments match your filters" : "No payments found"}
             </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {unsettledPayments.map((payment) => {
+            {paginatedPayments.map((payment) => {
               const remaining = payment.amount - payment.settledAmount;
               const progressPercent = (payment.settledAmount / payment.amount) * 100;
               const hasSettlements = payment.settlements && payment.settlements.length > 0;
               const isExpanded = expandedPaymentId === payment.id;
+              const isFullySettled = payment.settledAmount >= payment.amount;
 
               return (
                 <div
                   key={payment.id}
                   className={`rounded-xl border ${
-                    payment.settledAmount > 0
+                    isFullySettled
+                      ? "border-emerald-200 bg-emerald-50"
+                      : payment.settledAmount > 0
                       ? "border-blue-200 bg-blue-50"
                       : "border-amber-200 bg-amber-50"
                   }`}
@@ -156,7 +349,11 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
                           <p className="text-xl font-bold text-slate-900">
                             RM {formatCurrency(payment.amount)}
                           </p>
-                          {payment.settledAmount > 0 ? (
+                          {isFullySettled ? (
+                            <span className="rounded-full bg-emerald-200 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                              Fully Settled
+                            </span>
+                          ) : payment.settledAmount > 0 ? (
                             <span className="rounded-full bg-blue-200 px-2 py-0.5 text-xs font-medium text-blue-800">
                               Partially Settled
                             </span>
@@ -219,10 +416,17 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
                             Invoice
                           </Button>
                         )}
-                        <Button onClick={() => handleSettlePayment(payment)}>
-                          <CreditCard className="mr-2 h-4 w-4" />
-                          Settle
-                        </Button>
+                        {isFullySettled ? (
+                          <div className="flex items-center gap-2 text-emerald-600">
+                            <Check className="h-5 w-5" />
+                            <span className="text-sm font-medium">Settled</span>
+                          </div>
+                        ) : (
+                          <Button onClick={() => handleSettlePayment(payment)}>
+                            <CreditCard className="mr-2 h-4 w-4" />
+                            Settle
+                          </Button>
+                        )}
                       </div>
                     </div>
 
@@ -295,45 +499,65 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
             })}
           </div>
         )}
-      </div>
 
-      {/* Fully Settled Payments */}
-      {settledPayments.length > 0 && (
-        <div>
-          <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900">
-            <Check className="h-5 w-5 text-emerald-500" />
-            Fully Settled ({settledPayments.length})
-          </h3>
-          <div className="space-y-3">
-            {settledPayments.map((payment) => (
-              <div
-                key={payment.id}
-                className="rounded-xl border border-emerald-200 bg-emerald-50 p-4"
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="mt-6 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
+            <div className="text-sm text-slate-500">
+              Showing {(currentPage - 1) * pageSize + 1} to{" "}
+              {Math.min(currentPage * pageSize, filteredPayments.length)} of{" "}
+              {filteredPayments.length} payments
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
               >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <p className="text-xl font-bold text-slate-900">
-                        RM {formatCurrency(payment.amount)}
-                      </p>
-                      <span className="rounded-full bg-emerald-200 px-2 py-0.5 text-xs font-medium text-emerald-800">
-                        Settled
-                      </span>
-                    </div>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {format(new Date(payment.date), "dd MMM yyyy")}
-                      {payment.paidBy.name && (
-                        <span className="ml-2">• From: {payment.paidBy.name}</span>
-                      )}
-                    </p>
-                  </div>
-                  <Check className="h-8 w-8 text-emerald-500" />
-                </div>
+                <ChevronLeft className="h-4 w-4" />
+                Prev
+              </Button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`h-8 w-8 rounded-md text-sm font-medium transition-colors ${
+                        currentPage === pageNum
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
               </div>
-            ))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Settle Payment Modal */}
       {settlingPayment && (

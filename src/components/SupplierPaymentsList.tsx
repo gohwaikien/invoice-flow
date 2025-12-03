@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { format } from "date-fns";
 import { useDropzone } from "react-dropzone";
 import {
@@ -19,8 +19,13 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface Settlement {
   id: string;
@@ -74,6 +79,16 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [expandedPaymentId, setExpandedPaymentId] = useState<string | null>(null);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Filter state
+  const [statusFilter, setStatusFilter] = useState<"all" | "unlinked" | "linked" | "settled">("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
 
   const fetchPayments = useCallback(async () => {
     setIsLoading(true);
@@ -151,6 +166,55 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
     onRefresh?.();
   };
 
+  // Filter payments
+  const filteredPayments = useMemo(() => {
+    return payments.filter((p) => {
+      // Status filter
+      const settledAmount = p.settledAmount || 0;
+      const isFullySettled = settledAmount >= p.amount;
+      
+      if (statusFilter === "unlinked" && p.invoiceId) return false;
+      if (statusFilter === "linked" && !p.invoiceId) return false;
+      if (statusFilter === "settled" && !isFullySettled) return false;
+
+      // Date filter
+      if (dateFrom) {
+        const paymentDate = new Date(p.date);
+        const fromDate = new Date(dateFrom);
+        if (paymentDate < fromDate) return false;
+      }
+      if (dateTo) {
+        const paymentDate = new Date(p.date);
+        const toDate = new Date(dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        if (paymentDate > toDate) return false;
+      }
+
+      return true;
+    });
+  }, [payments, statusFilter, dateFrom, dateTo]);
+
+  // Paginate filtered payments
+  const paginatedPayments = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredPayments.slice(startIndex, startIndex + pageSize);
+  }, [filteredPayments, currentPage, pageSize]);
+
+  const totalPages = Math.ceil(filteredPayments.length / pageSize);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, dateFrom, dateTo, pageSize]);
+
+  const clearFilters = () => {
+    setStatusFilter("all");
+    setDateFrom("");
+    setDateTo("");
+  };
+
+  const hasActiveFilters = statusFilter !== "all" || dateFrom || dateTo;
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -159,28 +223,121 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
     );
   }
 
-  const unlinkedPayments = payments.filter((p) => !p.invoiceId);
-  const linkedPayments = payments.filter((p) => p.invoiceId);
-
   return (
-    <div className="space-y-8">
-      {/* Unlinked Payments */}
+    <div className="space-y-6">
+      {/* Filter Bar */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          {/* Status Filter */}
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-slate-400" />
+            <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+              {[
+                { value: "all", label: "All" },
+                { value: "unlinked", label: "No Invoice" },
+                { value: "linked", label: "Has Invoice" },
+                { value: "settled", label: "Settled" },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setStatusFilter(option.value as typeof statusFilter)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    statusFilter === option.value
+                      ? "bg-white text-blue-700 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Page Size & Toggle Filters */}
+          <div className="flex items-center gap-2">
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-blue-500 focus:outline-none"
+            >
+              <option value={5}>5 per page</option>
+              <option value={10}>10 per page</option>
+              <option value={20}>20 per page</option>
+              <option value={50}>50 per page</option>
+            </select>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowFilters(!showFilters)}
+              className={showFilters ? "bg-blue-50 text-blue-700" : ""}
+            >
+              <Filter className="mr-1 h-4 w-4" />
+              Filters
+            </Button>
+            {hasActiveFilters && (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                <X className="mr-1 h-4 w-4" />
+                Clear
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Advanced Filters */}
+        {showFilters && (
+          <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-slate-100 pt-4">
+            <div className="flex-1 min-w-[150px]">
+              <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                <Calendar className="mr-1 inline h-3 w-3" />
+                From Date
+              </label>
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <div className="flex-1 min-w-[150px]">
+              <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                <Calendar className="mr-1 inline h-3 w-3" />
+                To Date
+              </label>
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="h-9"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Filter Summary */}
+        {hasActiveFilters && (
+          <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+            <span>Showing {filteredPayments.length} of {payments.length} payments</span>
+          </div>
+        )}
+      </div>
+
+      {/* Payments List */}
       <div>
         <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900">
-          <DollarSign className="h-5 w-5 text-amber-500" />
-          Payments Awaiting Invoice ({unlinkedPayments.length})
+          <DollarSign className="h-5 w-5 text-blue-500" />
+          My Payments ({filteredPayments.length})
         </h3>
 
-        {unlinkedPayments.length === 0 ? (
+        {paginatedPayments.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-slate-200 p-8 text-center">
             <DollarSign className="mx-auto h-12 w-12 text-slate-300" />
             <p className="mt-4 text-slate-500">
-              No payments pending invoice attachment
+              {hasActiveFilters ? "No payments match your filters" : "No payments found"}
             </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {unlinkedPayments.map((payment) => {
+            {paginatedPayments.map((payment) => {
               const settledAmount = payment.settledAmount || 0;
               const progressPercent = (settledAmount / payment.amount) * 100;
               const isFullySettled = settledAmount >= payment.amount;
@@ -215,12 +372,26 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
                             </span>
                           ) : (
                             <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-medium text-amber-800">
-                              Needs Invoice / Settlement
+                              Pending
+                            </span>
+                          )}
+                          {payment.invoiceId ? (
+                            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                              Has Invoice
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+                              No Invoice
                             </span>
                           )}
                         </div>
                         <p className="mt-1 text-sm text-slate-600">
                           {format(new Date(payment.date), "dd MMM yyyy")}
+                          {payment.invoice && (
+                            <span className="ml-2 text-blue-600">
+                              • {payment.invoice.invoiceNumber || payment.invoice.fileName}
+                            </span>
+                          )}
                         </p>
                         {payment.notes && (
                           <p className="mt-2 text-sm text-slate-700 italic">
@@ -272,10 +443,21 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
                             <Trash2 className="h-4 w-4 text-red-500" />
                           )}
                         </Button>
-                        <Button onClick={() => handleAttachInvoice(payment)}>
-                          <Upload className="mr-2 h-4 w-4" />
-                          Attach Invoice
-                        </Button>
+                        {payment.invoice ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => window.open(payment.invoice!.fileUrl, "_blank")}
+                          >
+                            <ExternalLink className="mr-2 h-4 w-4" />
+                            Invoice
+                          </Button>
+                        ) : (
+                          <Button onClick={() => handleAttachInvoice(payment)}>
+                            <Upload className="mr-2 h-4 w-4" />
+                            Attach Invoice
+                          </Button>
+                        )}
                       </div>
                     </div>
 
@@ -353,199 +535,65 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
             })}
           </div>
         )}
-      </div>
 
-      {/* Linked Payments */}
-      {linkedPayments.length > 0 && (
-        <div>
-          <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900">
-            <Receipt className="h-5 w-5 text-blue-500" />
-            Payments with Invoice ({linkedPayments.length})
-          </h3>
-
-          <div className="space-y-3">
-            {linkedPayments.map((payment) => {
-              const invoice = payment.invoice!;
-              const settledAmount = invoice.paidAmount;
-              const totalAmount = invoice.totalAmount;
-              const progressPercent = (settledAmount / totalAmount) * 100;
-              const isExpanded = expandedPaymentId === payment.id;
-              const hasSettlements = invoice.settlements && invoice.settlements.length > 0;
-
-              return (
-                <div
-                  key={payment.id}
-                  className={`rounded-xl border ${
-                    invoice.status === "COMPLETED"
-                      ? "border-emerald-200 bg-emerald-50"
-                      : invoice.status === "PARTIAL"
-                      ? "border-amber-200 bg-amber-50"
-                      : "border-slate-200 bg-slate-50"
-                  }`}
-                >
-                  <div className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3">
-                          <p className="text-xl font-bold text-slate-900">
-                            RM {formatCurrency(payment.amount)}
-                          </p>
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                              invoice.status === "COMPLETED"
-                                ? "bg-emerald-200 text-emerald-800"
-                                : invoice.status === "PARTIAL"
-                                ? "bg-amber-200 text-amber-800"
-                                : "bg-slate-200 text-slate-800"
-                            }`}
-                          >
-                            {invoice.status === "COMPLETED"
-                              ? "Fully Settled"
-                              : invoice.status === "PARTIAL"
-                              ? "Partially Settled"
-                              : "Pending Settlement"}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-sm text-slate-600">
-                          {format(new Date(payment.date), "dd MMM yyyy")}
-                          <span className="ml-2">
-                            • {invoice.invoiceNumber || invoice.fileName}
-                          </span>
-                        </p>
-                        {payment.notes && (
-                          <p className="mt-2 text-sm text-slate-700 italic">
-                            "{payment.notes}"
-                          </p>
-                        )}
-
-                        {/* Settlement Progress Bar */}
-                        <div className="mt-3">
-                          <div className="flex items-center justify-between text-xs text-slate-600">
-                            <span>
-                              Settled: <span className="font-semibold text-emerald-600">RM {formatCurrency(settledAmount)}</span>
-                            </span>
-                            <span>
-                              of RM {formatCurrency(totalAmount)}
-                            </span>
-                          </div>
-                          <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200">
-                            <div
-                              className={`h-full rounded-full transition-all ${
-                                invoice.status === "COMPLETED"
-                                  ? "bg-emerald-500"
-                                  : "bg-amber-500"
-                              }`}
-                              style={{ width: `${Math.min(progressPercent, 100)}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="ml-4 flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleEdit(payment)}
-                          title="Edit"
-                        >
-                          <Pencil className="h-4 w-4 text-slate-500" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(payment)}
-                          disabled={deletingId === payment.id}
-                          title="Delete"
-                        >
-                          {deletingId === payment.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          )}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            window.open(invoice.fileUrl, "_blank");
-                          }}
-                        >
-                          <ExternalLink className="mr-2 h-4 w-4" />
-                          Invoice
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Expand/Collapse for Settlements */}
-                    {hasSettlements && (
-                      <button
-                        onClick={() =>
-                          setExpandedPaymentId(isExpanded ? null : payment.id)
-                        }
-                        className="mt-3 flex w-full items-center justify-center gap-1 rounded-lg bg-white/50 py-2 text-sm font-medium text-slate-600 hover:bg-white/80 transition-colors"
-                      >
-                        {isExpanded ? (
-                          <>
-                            <ChevronUp className="h-4 w-4" />
-                            Hide Settlement History
-                          </>
-                        ) : (
-                          <>
-                            <ChevronDown className="h-4 w-4" />
-                            View {invoice.settlements.length} Settlement{invoice.settlements.length > 1 ? "s" : ""}
-                          </>
-                        )}
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Settlements List (Expanded) */}
-                  {isExpanded && hasSettlements && (
-                    <div className="border-t border-slate-200 bg-white/50 p-4">
-                      <h4 className="mb-3 text-sm font-semibold text-slate-700">
-                        Settlement History
-                      </h4>
-                      <div className="space-y-2">
-                        {invoice.settlements.map((settlement) => (
-                          <div
-                            key={settlement.id}
-                            className="flex items-center justify-between rounded-lg bg-white p-3 shadow-sm"
-                          >
-                            <div>
-                              <p className="font-medium text-slate-900">
-                                RM {formatCurrency(settlement.amount)}
-                              </p>
-                              <p className="text-xs text-slate-500">
-                                {format(new Date(settlement.date), "dd MMM yyyy")} •{" "}
-                                {settlement.settledBy.name || settlement.settledBy.email}
-                              </p>
-                              {settlement.notes && (
-                                <p className="mt-1 text-xs text-slate-600">
-                                  {settlement.notes}
-                                </p>
-                              )}
-                            </div>
-                            {settlement.slipUrl && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => window.open(settlement.slipUrl!, "_blank")}
-                              >
-                                <Download className="mr-1 h-4 w-4" />
-                                Slip
-                              </Button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="mt-6 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
+            <div className="text-sm text-slate-500">
+              Showing {(currentPage - 1) * pageSize + 1} to{" "}
+              {Math.min(currentPage * pageSize, filteredPayments.length)} of{" "}
+              {filteredPayments.length} payments
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Prev
+              </Button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`h-8 w-8 rounded-md text-sm font-medium transition-colors ${
+                        currentPage === pageNum
+                          ? "bg-blue-100 text-blue-700"
+                          : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Upload Invoice Modal */}
       {showUploadModal && selectedPayment && (
