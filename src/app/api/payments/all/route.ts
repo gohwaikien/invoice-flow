@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
             totalAmount: true,
             paidAmount: true,
             status: true,
+            recipientName: true,
           },
         },
         settlements: {

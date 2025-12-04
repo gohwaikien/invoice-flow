@@ -21,6 +21,9 @@ import {
   Filter,
   Calendar,
   Search,
+  Pencil,
+  Trash2,
+  ArrowUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +55,7 @@ interface Payment {
     totalAmount: number;
     paidAmount: number;
     status: "PENDING" | "PARTIAL" | "COMPLETED";
+    recipientName: string | null;
   } | null;
   paidBy: { name: string | null; email: string | null };
   createdAt: string;
@@ -72,17 +76,25 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [expandedPaymentId, setExpandedPaymentId] = useState<string | null>(null);
   const [settlingPayment, setSettlingPayment] = useState<Payment | null>(null);
+  const [editingSettlement, setEditingSettlement] = useState<{ settlement: Settlement; payment: Payment } | null>(null);
+  const [deletingSettlementId, setDeletingSettlementId] = useState<string | null>(null);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
   // Filter state
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "partial" | "settled">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "settled">("all");
+  const [invoiceFilter, setInvoiceFilter] = useState<"all" | "with" | "without">("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [supplierFilter, setSupplierFilter] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
+  const [recipientFilter, setRecipientFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Sort state
+  type SortField = "date" | "amount" | "status";
+  const [sortField, setSortField] = useState<SortField>("date");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const fetchPayments = useCallback(async () => {
     setIsLoading(true);
@@ -121,23 +133,59 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
     onRefresh?.();
   };
 
+  const handleEditSuccess = () => {
+    setEditingSettlement(null);
+    fetchPayments();
+    onRefresh?.();
+  };
+
+  const handleDeleteSettlement = async (settlementId: string) => {
+    if (!confirm("Are you sure you want to delete this settlement?")) return;
+    
+    setDeletingSettlementId(settlementId);
+    try {
+      const response = await fetch(`/api/settlements/${settlementId}`, {
+        method: "DELETE",
+      });
+      
+      if (response.ok) {
+        fetchPayments();
+        onRefresh?.();
+      } else {
+        const data = await response.json();
+        alert(data.error || "Failed to delete settlement");
+      }
+    } catch (error) {
+      console.error("Error deleting settlement:", error);
+      alert("Failed to delete settlement");
+    } finally {
+      setDeletingSettlementId(null);
+    }
+  };
+
   // Get unique supplier names for filter dropdown
-  const uniqueSuppliers = useMemo(() => {
-    const suppliers = new Set<string>();
+  // Get unique recipient names for filter dropdown
+  const uniqueRecipients = useMemo(() => {
+    const recipients = new Set<string>();
     payments.forEach((p) => {
-      if (p.paidBy.name) suppliers.add(p.paidBy.name);
-      else if (p.paidBy.email) suppliers.add(p.paidBy.email);
+      if (p.invoice?.recipientName) {
+        recipients.add(p.invoice.recipientName);
+      }
     });
-    return Array.from(suppliers).sort();
+    return Array.from(recipients).sort();
   }, [payments]);
 
-  // Filter payments
+  // Filter and sort payments
   const filteredPayments = useMemo(() => {
-    return payments.filter((p) => {
-      // Status filter
-      if (statusFilter === "pending" && p.settledAmount > 0) return false;
-      if (statusFilter === "partial" && (p.settledAmount === 0 || p.settledAmount >= p.amount)) return false;
-      if (statusFilter === "settled" && p.settledAmount < p.amount) return false;
+    let result = payments.filter((p) => {
+      // Status filter (Pending = not fully settled, Settled = fully settled)
+      const isFullySettled = p.settledAmount >= p.amount;
+      if (statusFilter === "pending" && isFullySettled) return false;
+      if (statusFilter === "settled" && !isFullySettled) return false;
+
+      // Invoice filter
+      if (invoiceFilter === "with" && !p.invoiceId) return false;
+      if (invoiceFilter === "without" && p.invoiceId) return false;
 
       // Date filter
       if (dateFrom) {
@@ -152,15 +200,51 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
         if (paymentDate > toDate) return false;
       }
 
-      // Supplier filter
-      if (supplierFilter) {
-        const supplierName = p.paidBy.name || p.paidBy.email || "";
-        if (supplierName !== supplierFilter) return false;
+      // Recipient filter (based on invoice recipient)
+      if (recipientFilter) {
+        const invoiceRecipient = p.invoice?.recipientName || "";
+        if (invoiceRecipient.toLowerCase() !== recipientFilter.toLowerCase()) return false;
+      }
+
+      // Search query
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const invoiceName = p.invoice?.invoiceNumber?.toLowerCase() || "";
+        const invoiceFileName = p.invoice?.fileName?.toLowerCase() || "";
+        const notes = p.notes?.toLowerCase() || "";
+        if (!invoiceName.includes(query) && !invoiceFileName.includes(query) && !notes.includes(query)) {
+          return false;
+        }
       }
 
       return true;
     });
-  }, [payments, statusFilter, dateFrom, dateTo, supplierFilter]);
+
+    // Sort
+    result.sort((a, b) => {
+      let comparison = 0;
+      switch (sortField) {
+        case "date":
+          comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+          break;
+        case "amount":
+          comparison = a.amount - b.amount;
+          break;
+        case "status":
+          const aSettled = a.settledAmount >= a.amount;
+          const bSettled = b.settledAmount >= b.amount;
+          const aPartial = a.settledAmount > 0;
+          const bPartial = b.settledAmount > 0;
+          const aScore = aSettled ? 2 : aPartial ? 1 : 0;
+          const bScore = bSettled ? 2 : bPartial ? 1 : 0;
+          comparison = aScore - bScore;
+          break;
+      }
+      return sortOrder === "asc" ? comparison : -comparison;
+    });
+
+    return result;
+  }, [payments, statusFilter, invoiceFilter, dateFrom, dateTo, recipientFilter, searchQuery, sortField, sortOrder]);
 
   // Paginate filtered payments
   const paginatedPayments = useMemo(() => {
@@ -173,16 +257,18 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, dateFrom, dateTo, supplierFilter, pageSize]);
+  }, [statusFilter, invoiceFilter, dateFrom, dateTo, recipientFilter, searchQuery, pageSize]);
 
   const clearFilters = () => {
     setStatusFilter("all");
+    setInvoiceFilter("all");
     setDateFrom("");
     setDateTo("");
-    setSupplierFilter("");
+    setRecipientFilter("");
+    setSearchQuery("");
   };
 
-  const hasActiveFilters = statusFilter !== "all" || dateFrom || dateTo || supplierFilter;
+  const hasActiveFilters = statusFilter !== "all" || invoiceFilter !== "all" || dateFrom || dateTo || recipientFilter || searchQuery;
 
   if (isLoading) {
     return (
@@ -196,15 +282,61 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
     <div className="space-y-6">
       {/* Filter Bar */}
       <div className="rounded-xl border border-slate-200 bg-white p-4">
+        {/* Row 1: Search and Page Size */}
         <div className="flex flex-wrap items-center justify-between gap-4">
+          {/* Search */}
+          <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-[300px]">
+            <div className="relative w-full">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                type="text"
+                placeholder="Search invoice..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Page Size */}
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-emerald-500 focus:outline-none"
+            >
+              <option value={5}>5 per page</option>
+              <option value={10}>10 per page</option>
+              <option value={20}>20 per page</option>
+              <option value={50}>50 per page</option>
+            </select>
+
+            {hasActiveFilters && (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                <X className="mr-1 h-4 w-4" />
+                Clear
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: Filters */}
+        <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-4">
           {/* Status Filter */}
           <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-slate-400" />
+            <span className="text-xs font-medium text-slate-500">Status:</span>
             <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
               {[
                 { value: "all", label: "All" },
                 { value: "pending", label: "Pending" },
-                { value: "partial", label: "Partial" },
                 { value: "settled", label: "Settled" },
               ].map((option) => (
                 <button
@@ -222,83 +354,99 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
             </div>
           </div>
 
-          {/* Page Size & Toggle Filters */}
+          {/* Invoice Filter */}
           <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-500">Invoice:</span>
+            <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+              {[
+                { value: "all", label: "All" },
+                { value: "with", label: "With Invoice" },
+                { value: "without", label: "No Invoice" },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setInvoiceFilter(option.value as typeof invoiceFilter)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    invoiceFilter === option.value
+                      ? "bg-white text-emerald-700 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Recipient Filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-500">Recipient:</span>
             <select
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
+              value={recipientFilter}
+              onChange={(e) => setRecipientFilter(e.target.value)}
               className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-emerald-500 focus:outline-none"
             >
-              <option value={5}>5 per page</option>
-              <option value={10}>10 per page</option>
-              <option value={20}>20 per page</option>
-              <option value={50}>50 per page</option>
+              <option value="">All</option>
+              {uniqueRecipients.map((recipient) => (
+                <option key={recipient} value={recipient}>
+                  {recipient}
+                </option>
+              ))}
             </select>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowFilters(!showFilters)}
-              className={showFilters ? "bg-emerald-50 text-emerald-700" : ""}
-            >
-              <Filter className="mr-1 h-4 w-4" />
-              Filters
-            </Button>
-            {hasActiveFilters && (
-              <Button variant="ghost" size="sm" onClick={clearFilters}>
-                <X className="mr-1 h-4 w-4" />
-                Clear
-              </Button>
-            )}
           </div>
         </div>
 
-        {/* Advanced Filters */}
-        {showFilters && (
-          <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-slate-100 pt-4">
-            <div className="flex-1 min-w-[150px]">
-              <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                <Calendar className="mr-1 inline h-3 w-3" />
-                From Date
-              </label>
-              <Input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="h-9"
-              />
-            </div>
-            <div className="flex-1 min-w-[150px]">
-              <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                <Calendar className="mr-1 inline h-3 w-3" />
-                To Date
-              </label>
-              <Input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="h-9"
-              />
-            </div>
-            <div className="flex-1 min-w-[200px]">
-              <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                <Search className="mr-1 inline h-3 w-3" />
-                Supplier
-              </label>
+        {/* Row 3: Date Range & Sort */}
+        <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-slate-100 pt-4">
+          <div className="flex-1 min-w-[140px] max-w-[180px]">
+            <label className="mb-1.5 block text-xs font-medium text-slate-500">
+              <Calendar className="mr-1 inline h-3 w-3" />
+              From Date
+            </label>
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="h-9"
+            />
+          </div>
+          <div className="flex-1 min-w-[140px] max-w-[180px]">
+            <label className="mb-1.5 block text-xs font-medium text-slate-500">
+              <Calendar className="mr-1 inline h-3 w-3" />
+              To Date
+            </label>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="h-9"
+            />
+          </div>
+          <div className="flex-1 min-w-[160px] max-w-[200px]">
+            <label className="mb-1.5 block text-xs font-medium text-slate-500">
+              <ArrowUpDown className="mr-1 inline h-3 w-3" />
+              Sort By
+            </label>
+            <div className="flex gap-1">
               <select
-                value={supplierFilter}
-                onChange={(e) => setSupplierFilter(e.target.value)}
-                className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm focus:border-emerald-500 focus:outline-none"
+                value={sortField}
+                onChange={(e) => setSortField(e.target.value as SortField)}
+                className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm focus:border-emerald-500 focus:outline-none"
               >
-                <option value="">All Suppliers</option>
-                {uniqueSuppliers.map((supplier) => (
-                  <option key={supplier} value={supplier}>
-                    {supplier}
-                  </option>
-                ))}
+                <option value="date">Date</option>
+                <option value="amount">Amount</option>
+                <option value="status">Status</option>
               </select>
+              <button
+                onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+                className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm hover:bg-slate-50"
+                title={sortOrder === "asc" ? "Ascending" : "Descending"}
+              >
+                {sortOrder === "asc" ? "↑" : "↓"}
+              </button>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Filter Summary */}
         {hasActiveFilters && (
@@ -478,17 +626,44 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
                                   TX: {settlement.transactionId}
                                 </p>
                               )}
+                              {settlement.notes && (
+                                <p className="mt-0.5 text-xs text-slate-500 italic">
+                                  {settlement.notes}
+                                </p>
+                              )}
                             </div>
-                            {settlement.slipUrl && (
+                            <div className="flex items-center gap-1">
+                              {settlement.slipUrl && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => window.open(settlement.slipUrl!, "_blank")}
+                                >
+                                  <Download className="mr-1 h-4 w-4" />
+                                  Slip
+                                </Button>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => window.open(settlement.slipUrl!, "_blank")}
+                                onClick={() => setEditingSettlement({ settlement, payment })}
                               >
-                                <Download className="mr-1 h-4 w-4" />
-                                Slip
+                                <Pencil className="h-4 w-4" />
                               </Button>
-                            )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteSettlement(settlement.id)}
+                                disabled={deletingSettlementId === settlement.id}
+                                className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                              >
+                                {deletingSettlementId === settlement.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -565,6 +740,16 @@ export function BusinessPaymentsList({ onRefresh }: BusinessPaymentsListProps) {
           payment={settlingPayment}
           onClose={() => setSettlingPayment(null)}
           onSuccess={handleSettleSuccess}
+        />
+      )}
+
+      {/* Edit Settlement Modal */}
+      {editingSettlement && (
+        <EditSettlementModal
+          settlement={editingSettlement.settlement}
+          payment={editingSettlement.payment}
+          onClose={() => setEditingSettlement(null)}
+          onSuccess={handleEditSuccess}
         />
       )}
     </div>
@@ -648,7 +833,9 @@ function SettlePaymentModal({
       return;
     }
 
-    if (numAmount > remaining) {
+    // Use a small epsilon for floating-point comparison to avoid precision issues
+    const epsilon = 0.001;
+    if (numAmount > remaining + epsilon) {
       setError(`Amount cannot exceed remaining balance of RM ${formatCurrency(remaining)}`);
       return;
     }
@@ -839,6 +1026,225 @@ function SettlePaymentModal({
                 <>
                   <CreditCard className="mr-2 h-4 w-4" />
                   Settle RM {parseFloat(amount || "0").toLocaleString()}
+              </>
+            )}
+          </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Modal for editing a settlement
+function EditSettlementModal({
+  settlement,
+  payment,
+  onClose,
+  onSuccess,
+}: {
+  settlement: Settlement;
+  payment: Payment;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [amount, setAmount] = useState(settlement.amount.toFixed(2));
+  const [date, setDate] = useState(new Date(settlement.date).toISOString().split("T")[0]);
+  const [notes, setNotes] = useState(settlement.notes || "");
+  const [transactionId, setTransactionId] = useState(settlement.transactionId || "");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat("ms-MY", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  };
+
+  // Calculate max allowed amount (remaining + current settlement amount)
+  const otherSettlementsTotal = payment.settlements
+    .filter((s) => s.id !== settlement.id)
+    .reduce((sum, s) => sum + s.amount, 0);
+  const maxAllowedAmount = payment.amount - otherSettlementsTotal;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      setError("Please enter a valid amount");
+      return;
+    }
+
+    // Use epsilon for floating-point comparison
+    const epsilon = 0.001;
+    if (numAmount > maxAllowedAmount + epsilon) {
+      setError(`Amount cannot exceed RM ${formatCurrency(maxAllowedAmount)}`);
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(`/api/settlements/${settlement.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          amount: numAmount,
+          date,
+          notes: notes || null,
+          transactionId: transactionId || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || data.message || "Failed to update settlement");
+      }
+
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="relative z-10 w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">
+              Edit Settlement
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Payment: RM {formatCurrency(payment.amount)}
+              <span className="ml-2">
+                (Max for this settlement: RM {formatCurrency(maxAllowedAmount)})
+              </span>
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-full p-2 hover:bg-slate-100"
+          >
+            <X className="h-5 w-5 text-slate-500" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Current Slip Info */}
+          {settlement.slipUrl && (
+            <div className="rounded-lg bg-slate-50 p-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-slate-400" />
+                <span className="text-sm text-slate-600">{settlement.slipName || "Payment slip"}</span>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => window.open(settlement.slipUrl!, "_blank")}
+              >
+                <ExternalLink className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
+          {/* Amount */}
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+              Settlement Amount (RM) *
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-right text-lg font-semibold focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              required
+            />
+          </div>
+
+          {/* Date */}
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+              Settlement Date
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+            />
+          </div>
+
+          {/* Transaction ID */}
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+              Transaction ID
+            </label>
+            <input
+              type="text"
+              value={transactionId}
+              onChange={(e) => setTransactionId(e.target.value)}
+              placeholder="Enter transaction ID"
+              className="w-full rounded-lg border border-slate-300 px-4 py-2.5 font-mono text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+            />
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+              Notes
+            </label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional notes..."
+              rows={2}
+              className="w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+            />
+          </div>
+
+          {error && (
+            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex-1"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Check className="mr-2 h-4 w-4" />
+                  Save Changes
                 </>
               )}
             </Button>

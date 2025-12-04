@@ -24,6 +24,7 @@ import {
   Filter,
   Calendar,
   Search,
+  ArrowUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +56,7 @@ interface Payment {
     totalAmount: number;
     paidAmount: number;
     status: "PENDING" | "PARTIAL" | "COMPLETED";
+    recipientName: string | null;
     settlements: Settlement[];
   } | null;
   paidBy: { name: string | null; email: string | null };
@@ -86,11 +88,17 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
   const [pageSize, setPageSize] = useState(10);
 
   // Filter state
-  const [statusFilter, setStatusFilter] = useState<"all" | "unlinked" | "linked" | "settled">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "settled">("all");
+  const [invoiceFilter, setInvoiceFilter] = useState<"all" | "with" | "without">("all");
+  const [recipientFilter, setRecipientFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
+
+  // Sort state
+  type SortField = "date" | "amount" | "status";
+  const [sortField, setSortField] = useState<SortField>("date");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const fetchPayments = useCallback(async () => {
     setIsLoading(true);
@@ -168,16 +176,36 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
     onRefresh?.();
   };
 
-  // Filter payments
+  // Get unique recipient names for filter dropdown
+  const uniqueRecipients = useMemo(() => {
+    const recipients = new Set<string>();
+    payments.forEach((p) => {
+      if (p.invoice?.recipientName) {
+        recipients.add(p.invoice.recipientName);
+      }
+    });
+    return Array.from(recipients).sort();
+  }, [payments]);
+
+  // Filter and sort payments
   const filteredPayments = useMemo(() => {
-    return payments.filter((p) => {
-      // Status filter
+    let result = payments.filter((p) => {
+      // Status filter (Pending = not fully settled, Settled = fully settled)
       const settledAmount = p.settledAmount || 0;
       const isFullySettled = settledAmount >= p.amount;
       
-      if (statusFilter === "unlinked" && p.invoiceId) return false;
-      if (statusFilter === "linked" && !p.invoiceId) return false;
+      if (statusFilter === "pending" && isFullySettled) return false;
       if (statusFilter === "settled" && !isFullySettled) return false;
+
+      // Invoice filter
+      if (invoiceFilter === "with" && !p.invoiceId) return false;
+      if (invoiceFilter === "without" && p.invoiceId) return false;
+
+      // Recipient filter
+      if (recipientFilter) {
+        const invoiceRecipient = p.invoice?.recipientName || "";
+        if (invoiceRecipient.toLowerCase() !== recipientFilter.toLowerCase()) return false;
+      }
 
       // Date filter
       if (dateFrom) {
@@ -205,7 +233,32 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
 
       return true;
     });
-  }, [payments, statusFilter, dateFrom, dateTo, searchQuery]);
+
+    // Sort
+    result.sort((a, b) => {
+      let comparison = 0;
+      switch (sortField) {
+        case "date":
+          comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+          break;
+        case "amount":
+          comparison = a.amount - b.amount;
+          break;
+        case "status":
+          const aSettled = (a.settledAmount || 0) >= a.amount;
+          const bSettled = (b.settledAmount || 0) >= b.amount;
+          const aPartial = (a.settledAmount || 0) > 0;
+          const bPartial = (b.settledAmount || 0) > 0;
+          const aScore = aSettled ? 2 : aPartial ? 1 : 0;
+          const bScore = bSettled ? 2 : bPartial ? 1 : 0;
+          comparison = aScore - bScore;
+          break;
+      }
+      return sortOrder === "asc" ? comparison : -comparison;
+    });
+
+    return result;
+  }, [payments, statusFilter, invoiceFilter, recipientFilter, dateFrom, dateTo, searchQuery, sortField, sortOrder]);
 
   // Paginate filtered payments
   const paginatedPayments = useMemo(() => {
@@ -218,16 +271,18 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, dateFrom, dateTo, searchQuery, pageSize]);
+  }, [statusFilter, invoiceFilter, dateFrom, dateTo, searchQuery, pageSize]);
 
   const clearFilters = () => {
     setStatusFilter("all");
+    setInvoiceFilter("all");
+    setRecipientFilter("");
     setDateFrom("");
     setDateTo("");
     setSearchQuery("");
   };
 
-  const hasActiveFilters = statusFilter !== "all" || dateFrom || dateTo || searchQuery;
+  const hasActiveFilters = statusFilter !== "all" || invoiceFilter !== "all" || recipientFilter || dateFrom || dateTo || searchQuery;
 
   if (isLoading) {
     return (
@@ -241,6 +296,7 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
     <div className="space-y-6">
       {/* Filter Bar */}
       <div className="rounded-xl border border-slate-200 bg-white p-4">
+        {/* Row 1: Search and Page Size */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           {/* Search */}
           <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-[300px]">
@@ -248,7 +304,7 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
                 type="text"
-                placeholder="Search invoice name..."
+                placeholder="Search invoice..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 h-9"
@@ -264,14 +320,37 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
             </div>
           </div>
 
+          <div className="flex items-center gap-3">
+            {/* Page Size */}
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-blue-500 focus:outline-none"
+            >
+              <option value={5}>5 per page</option>
+              <option value={10}>10 per page</option>
+              <option value={20}>20 per page</option>
+              <option value={50}>50 per page</option>
+            </select>
+
+            {hasActiveFilters && (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                <X className="mr-1 h-4 w-4" />
+                Clear
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: Filters */}
+        <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-4">
           {/* Status Filter */}
           <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-slate-400" />
+            <span className="text-xs font-medium text-slate-500">Status:</span>
             <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
               {[
                 { value: "all", label: "All" },
-                { value: "unlinked", label: "No Invoice" },
-                { value: "linked", label: "Has Invoice" },
+                { value: "pending", label: "Pending" },
                 { value: "settled", label: "Settled" },
               ].map((option) => (
                 <button
@@ -289,65 +368,101 @@ export function SupplierPaymentsList({ onRefresh }: SupplierPaymentsListProps) {
             </div>
           </div>
 
-          {/* Page Size & Toggle Filters */}
+          {/* Invoice Filter */}
           <div className="flex items-center gap-2">
-            <select
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
-              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-blue-500 focus:outline-none"
-            >
-              <option value={5}>5 per page</option>
-              <option value={10}>10 per page</option>
-              <option value={20}>20 per page</option>
-              <option value={50}>50 per page</option>
-            </select>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowFilters(!showFilters)}
-              className={showFilters ? "bg-blue-50 text-blue-700" : ""}
-            >
-              <Filter className="mr-1 h-4 w-4" />
-              Filters
-            </Button>
-            {hasActiveFilters && (
-              <Button variant="ghost" size="sm" onClick={clearFilters}>
-                <X className="mr-1 h-4 w-4" />
-                Clear
-              </Button>
-            )}
+            <span className="text-xs font-medium text-slate-500">Invoice:</span>
+            <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+              {[
+                { value: "all", label: "All" },
+                { value: "with", label: "With Invoice" },
+                { value: "without", label: "No Invoice" },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setInvoiceFilter(option.value as typeof invoiceFilter)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    invoiceFilter === option.value
+                      ? "bg-white text-blue-700 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* Recipient Filter */}
+          {uniqueRecipients.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-slate-500">Recipient:</span>
+              <select
+                value={recipientFilter}
+                onChange={(e) => setRecipientFilter(e.target.value)}
+                className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">All</option>
+                {uniqueRecipients.map((recipient) => (
+                  <option key={recipient} value={recipient}>
+                    {recipient}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
-        {/* Advanced Filters */}
-        {showFilters && (
-          <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-slate-100 pt-4">
-            <div className="flex-1 min-w-[150px]">
-              <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                <Calendar className="mr-1 inline h-3 w-3" />
-                From Date
-              </label>
-              <Input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="h-9"
-              />
-            </div>
-            <div className="flex-1 min-w-[150px]">
-              <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                <Calendar className="mr-1 inline h-3 w-3" />
-                To Date
-              </label>
-              <Input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="h-9"
-              />
+        {/* Row 3: Date Range & Sort */}
+        <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-slate-100 pt-4">
+          <div className="flex-1 min-w-[140px] max-w-[180px]">
+            <label className="mb-1.5 block text-xs font-medium text-slate-500">
+              <Calendar className="mr-1 inline h-3 w-3" />
+              From Date
+            </label>
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="h-9"
+            />
+          </div>
+          <div className="flex-1 min-w-[140px] max-w-[180px]">
+            <label className="mb-1.5 block text-xs font-medium text-slate-500">
+              <Calendar className="mr-1 inline h-3 w-3" />
+              To Date
+            </label>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="h-9"
+            />
+          </div>
+          <div className="flex-1 min-w-[160px] max-w-[200px]">
+            <label className="mb-1.5 block text-xs font-medium text-slate-500">
+              <ArrowUpDown className="mr-1 inline h-3 w-3" />
+              Sort By
+            </label>
+            <div className="flex gap-1">
+              <select
+                value={sortField}
+                onChange={(e) => setSortField(e.target.value as SortField)}
+                className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="date">Date</option>
+                <option value="amount">Amount</option>
+                <option value="status">Status</option>
+              </select>
+              <button
+                onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+                className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm hover:bg-slate-50"
+                title={sortOrder === "asc" ? "Ascending" : "Descending"}
+              >
+                {sortOrder === "asc" ? "↑" : "↓"}
+              </button>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Filter Summary */}
         {hasActiveFilters && (

@@ -61,8 +61,8 @@ export function DashboardClient({ session }: DashboardClientProps) {
 
   const [paymentsKey, setPaymentsKey] = useState(0); // To trigger refresh
   
-  // For Business view: switch between Invoices and Payments
-  const [businessTab, setBusinessTab] = useState<"invoices" | "payments">("payments");
+  // For Business view: filter for with/without invoice
+  const [invoiceTypeFilter, setInvoiceTypeFilter] = useState<"all" | "with" | "without">("all");
 
   const fetchInvoices = useCallback(async () => {
     setIsLoading(true);
@@ -363,209 +363,15 @@ export function DashboardClient({ session }: DashboardClientProps) {
           </>
         )}
 
-        {/* Business View - Tab Switcher */}
+        {/* Business View - Consolidated */}
         {effectiveRole === "BUSINESS" && (
-          <>
-            {/* Tab Switcher */}
-            <div className="mb-6 flex items-center gap-4">
-              <div className="flex rounded-lg border border-slate-200 bg-white p-1">
-                <button
-                  onClick={() => setBusinessTab("payments")}
-                  className={`flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-                    businessTab === "payments"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  <DollarSign className="h-4 w-4" />
-                  Settle Payments
-                </button>
-                <button
-                  onClick={() => setBusinessTab("invoices")}
-                  className={`flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-                    businessTab === "invoices"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  <FileText className="h-4 w-4" />
-                  View Invoices
-                </button>
-              </div>
-            </div>
-
-            {/* Payments View for Business */}
-            {businessTab === "payments" && (
-              <BusinessPaymentsList
-                key={paymentsKey}
-                onRefresh={() => {
-                  setPaymentsKey((k) => k + 1);
-                  fetchInvoices();
-                }}
-              />
-            )}
-
-            {/* Invoices View for Business */}
-            {businessTab === "invoices" && (
-              <>
-                {/* Status Filter Bar */}
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <Filter className="h-5 w-5 text-slate-400" />
-                    <div className="flex rounded-lg border border-slate-200 bg-white p-1">
-                      {["all", "PENDING", "PARTIAL", "COMPLETED"].map((status) => (
-                        <button
-                          key={status}
-                          onClick={() => setFilter(status as typeof filter)}
-                          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                            filter === status
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "text-slate-600 hover:bg-slate-100"
-                          }`}
-                        >
-                          {status === "all" ? "All" : status.charAt(0) + status.slice(1).toLowerCase()}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" onClick={fetchInvoices} size="icon">
-                      <RefreshCcw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Advanced Filters */}
-                <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4">
-                  <div className="flex flex-wrap items-end gap-4">
-                    {/* Date From */}
-                    <div className="flex-1 min-w-[150px]">
-                      <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                        <Calendar className="mr-1 inline h-3 w-3" />
-                        From Date
-                      </label>
-                      <Input
-                        type="date"
-                        value={dateFrom}
-                        onChange={(e) => setDateFrom(e.target.value)}
-                        className="h-9"
-                      />
-                    </div>
-
-                    {/* Date To */}
-                    <div className="flex-1 min-w-[150px]">
-                      <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                        <Calendar className="mr-1 inline h-3 w-3" />
-                        To Date
-                      </label>
-                      <Input
-                        type="date"
-                        value={dateTo}
-                        onChange={(e) => setDateTo(e.target.value)}
-                        className="h-9"
-                      />
-                    </div>
-
-                    {/* Recipient Filter */}
-                    <div className="flex-1 min-w-[200px]">
-                      <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                        <Search className="mr-1 inline h-3 w-3" />
-                        Recipient
-                      </label>
-                      <select
-                        value={recipientFilter}
-                        onChange={(e) => setRecipientFilter(e.target.value)}
-                        className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                      >
-                        <option value="">All Recipients</option>
-                        {uniqueRecipients.map((recipient) => (
-                          <option key={recipient} value={recipient}>
-                            {recipient}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Sort */}
-                    <div className="flex-1 min-w-[180px]">
-                      <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                        <ArrowUpDown className="mr-1 inline h-3 w-3" />
-                        Sort By
-                      </label>
-                      <div className="flex gap-1">
-                        <select
-                          value={sortField}
-                          onChange={(e) => setSortField(e.target.value as SortField)}
-                          className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                        >
-                          <option value="date">Date</option>
-                          <option value="amount">Amount</option>
-                          <option value="recipient">Recipient</option>
-                          <option value="status">Status</option>
-                        </select>
-                        <button
-                          onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
-                          className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm hover:bg-slate-50"
-                          title={sortOrder === "asc" ? "Ascending" : "Descending"}
-                        >
-                          {sortOrder === "asc" ? "↑" : "↓"}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Clear Filters */}
-                    {hasActiveFilters && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={clearFilters}
-                        className="h-9 text-slate-500 hover:text-slate-700"
-                      >
-                        <X className="mr-1 h-4 w-4" />
-                        Clear
-                      </Button>
-                    )}
-                  </div>
-
-                  {/* Filter Summary */}
-                  {hasActiveFilters && (
-                    <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
-                      <span>Showing {filteredAndSortedInvoices.length} of {invoices.length} invoices</span>
-                      {recipientFilter && (
-                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">
-                          {recipientFilter}
-                        </span>
-                      )}
-                      {dateFrom && (
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
-                          From: {dateFrom}
-                        </span>
-                      )}
-                      {dateTo && (
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
-                          To: {dateTo}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Invoice Table */}
-                {isLoading ? (
-                  <div className="flex items-center justify-center py-16">
-                    <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-                  </div>
-                ) : (
-                  <InvoiceTable
-                    invoices={filteredAndSortedInvoices}
-                    userRole={effectiveRole}
-                    onRefresh={fetchInvoices}
-                  />
-                )}
-              </>
-            )}
-          </>
+          <BusinessPaymentsList
+            key={paymentsKey}
+            onRefresh={() => {
+              setPaymentsKey((k) => k + 1);
+              fetchInvoices();
+            }}
+          />
         )}
       </main>
 
