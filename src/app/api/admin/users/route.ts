@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, hasRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { UserRole } from "@prisma/client";
 
 // GET all users (admin only)
 export async function GET() {
@@ -81,11 +82,12 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Support both new format (roles array) and legacy format (single role with action)
-    let newRoles: string[];
+    let newRoles: UserRole[];
+    const validRoles: UserRole[] = ["ADMIN", "SUPPLIER", "BUSINESS"];
 
     if (roles) {
       // New format: directly set roles array
-      newRoles = roles.filter((r: string) => ["ADMIN", "SUPPLIER", "BUSINESS"].includes(r));
+      newRoles = roles.filter((r: string) => validRoles.includes(r as UserRole)) as UserRole[];
     } else if (role && action) {
       // Legacy format: add or remove a single role
       const user = await prisma.user.findUnique({
@@ -95,7 +97,7 @@ export async function PATCH(request: NextRequest) {
       const currentRoles = user?.roles || [];
 
       if (action === "add") {
-        newRoles = [...new Set([...currentRoles, role])];
+        newRoles = [...new Set([...currentRoles, role as UserRole])];
       } else if (action === "remove") {
         newRoles = currentRoles.filter((r) => r !== role);
       } else {
@@ -109,10 +111,10 @@ export async function PATCH(request: NextRequest) {
       });
       const currentRoles = user?.roles || [];
 
-      if (currentRoles.includes(role)) {
+      if (currentRoles.includes(role as UserRole)) {
         newRoles = currentRoles.filter((r) => r !== role);
       } else {
-        newRoles = [...currentRoles, role];
+        newRoles = [...currentRoles, role as UserRole];
       }
     } else {
       return NextResponse.json(

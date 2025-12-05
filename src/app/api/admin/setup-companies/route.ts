@@ -40,7 +40,9 @@ export async function POST() {
       if (user) {
         // Add SUPPLIER role to existing roles
         const currentRoles = user.roles || [];
-        const newRoles = currentRoles.includes("SUPPLIER") ? currentRoles : [...currentRoles, "SUPPLIER"];
+        const newRoles = currentRoles.includes("SUPPLIER") 
+          ? currentRoles 
+          : [...currentRoles, "SUPPLIER" as const];
         await prisma.user.update({
           where: { email },
           data: {
