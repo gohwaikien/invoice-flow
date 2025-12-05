@@ -17,10 +17,55 @@ enum UserRole {
   BUSINESS
 }
 
+enum CompanyType {
+  SUPPLIER
+  BUSINESS
+}
+
 enum InvoiceStatus {
   PENDING
   PARTIAL
   COMPLETED
+}
+
+// Company/Organization that users belong to
+model Company {
+  id        String      @id @default(cuid())
+  name      String
+  type      CompanyType
+  
+  // Users in this company
+  users     User[]
+  
+  // For SUPPLIER companies: their payments and invoices
+  payments  Payment[]
+  invoices  Invoice[]
+  
+  // For BUSINESS companies: which suppliers they can access
+  supplierAccess BusinessAccess[] @relation("BusinessCompany")
+  
+  // For SUPPLIER companies: which businesses can access them
+  businessAccess BusinessAccess[] @relation("SupplierCompany")
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Defines which Business companies can access which Supplier companies
+model BusinessAccess {
+  id                String   @id @default(cuid())
+  
+  businessCompanyId String
+  businessCompany   Company  @relation("BusinessCompany", fields: [businessCompanyId], references: [id], onDelete: Cascade)
+  
+  supplierCompanyId String
+  supplierCompany   Company  @relation("SupplierCompany", fields: [supplierCompanyId], references: [id], onDelete: Cascade)
+  
+  grantedAt         DateTime @default(now())
+  
+  @@unique([businessCompanyId, supplierCompanyId])
+  @@index([businessCompanyId])
+  @@index([supplierCompanyId])
 }
 
 model Account {
@@ -61,6 +106,10 @@ model User {
   accounts      Account[]
   sessions      Session[]
 
+  // Company the user belongs to
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   // Invoices uploaded by supplier
   uploadedInvoices Invoice[] @relation("UploadedInvoices")
 
@@ -75,6 +124,8 @@ model User {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([companyId])
 }
 
 model VerificationToken {
@@ -106,6 +157,10 @@ model Invoice {
   recipientId String?
   recipient   User?   @relation("ReceivedInvoices", fields: [recipientId], references: [id])
 
+  // Company that owns this invoice (Supplier company)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   // Supplier's payments (what was paid on behalf)
   payments Payment[]
 
@@ -117,6 +172,7 @@ model Invoice {
 
   @@index([uploaderId])
   @@index([recipientId])
+  @@index([companyId])
   @@index([status])
 }
 
@@ -136,6 +192,10 @@ model Payment {
   paidById String
   paidBy   User   @relation(fields: [paidById], references: [id])
 
+  // Company that owns this payment (Supplier company)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   // Direct settlements on this payment (when no invoice attached)
   settlements Settlement[]
 
@@ -147,6 +207,7 @@ model Payment {
 
   @@index([invoiceId])
   @@index([paidById])
+  @@index([companyId])
 }
 
 // Settlement = Business paying back the supplier

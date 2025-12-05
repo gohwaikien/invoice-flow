@@ -28,18 +28,18 @@ export async function POST(
     // Check invoice exists and get linked payment
     const invoice = await prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: {
-        payments: {
-          take: 1, // Get the first linked payment
-        },
-      },
+    });
+
+    // Get linked payment separately
+    const linkedPaymentRecord = await prisma.payment.findFirst({
+      where: { invoiceId },
     });
 
     if (!invoice) {
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
 
-    const linkedPayment = invoice.payments[0] || null;
+    const linkedPayment = linkedPaymentRecord;
 
     const formData = await request.formData();
     const amount = parseFloat(formData.get("amount") as string);
@@ -124,11 +124,12 @@ export async function POST(
 
     // Also update the linked payment's settledAmount if exists
     if (linkedPayment) {
+      const currentSettled = (linkedPayment as { settledAmount?: number }).settledAmount || 0;
       await prisma.payment.update({
         where: { id: linkedPayment.id },
         data: {
-          settledAmount: linkedPayment.settledAmount + amount,
-        },
+          settledAmount: currentSettled + amount,
+        } as any,
       });
     }
 

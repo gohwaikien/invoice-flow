@@ -19,7 +19,34 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Get accessible supplier company IDs for business users
+    let accessibleCompanyIds: string[] | null = null;
+
+    if (session.user.role === "BUSINESS") {
+      // Get user's company
+      const user = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { companyId: true },
+      });
+
+      if (user?.companyId) {
+        // Get supplier companies this business has access to
+        const accessRecords = await prisma.businessAccess.findMany({
+          where: { businessCompanyId: user.companyId },
+          select: { supplierCompanyId: true },
+        });
+        accessibleCompanyIds = accessRecords.map((a) => a.supplierCompanyId);
+      }
+    }
+    // ADMIN sees all - accessibleCompanyIds stays null
+
+    const where: any = {};
+    if (accessibleCompanyIds !== null) {
+      where.companyId = { in: accessibleCompanyIds };
+    }
+
     const payments = await prisma.payment.findMany({
+      where,
       select: {
         id: true,
         amount: true,
@@ -28,6 +55,13 @@ export async function GET(request: NextRequest) {
         invoiceId: true,
         settledAmount: true,
         createdAt: true,
+        companyId: true,
+        company: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         invoice: {
           select: {
             id: true,

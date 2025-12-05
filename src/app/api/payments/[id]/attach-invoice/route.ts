@@ -83,6 +83,12 @@ export async function POST(
       }
     }
 
+    // Get user's company for the invoice
+    const userWithCompany = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { companyId: true },
+    });
+
     // Create invoice and link to payment
     // Note: Supplier payments don't count towards settled amount (only settlements do)
     const invoice = await prisma.invoice.create({
@@ -99,6 +105,7 @@ export async function POST(
         fileName: file.name,
         uploaderId: session.user.id,
         recipientId: session.user.id, // The supplier who uploaded becomes the recipient
+        companyId: userWithCompany?.companyId || payment.companyId || null, // Set company from user or payment
         ocrData: ocrResult ? JSON.parse(JSON.stringify(ocrResult)) : null,
       },
     });

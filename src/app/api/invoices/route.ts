@@ -26,11 +26,35 @@ export async function GET(request: NextRequest) {
   try {
     let whereClause: Record<string, unknown> = {};
 
+    // Get user's company info
+    const userWithCompany = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { companyId: true, role: true },
+    });
+
     if (user.role === "SUPPLIER") {
-      // Suppliers see only their own uploaded invoices
-      whereClause.uploaderId = user.id;
+      // Suppliers see invoices from their company
+      if (userWithCompany?.companyId) {
+        whereClause.companyId = userWithCompany.companyId;
+      } else {
+        // Fallback: see only their own uploaded invoices
+        whereClause.uploaderId = user.id;
+      }
+    } else if (user.role === "BUSINESS") {
+      // Business users see invoices from suppliers they have access to
+      if (userWithCompany?.companyId) {
+        const accessRecords = await prisma.businessAccess.findMany({
+          where: { businessCompanyId: userWithCompany.companyId },
+          select: { supplierCompanyId: true },
+        });
+        const accessibleCompanyIds = accessRecords.map((a) => a.supplierCompanyId);
+        whereClause.companyId = { in: accessibleCompanyIds };
+      } else {
+        // No company - see nothing
+        whereClause.companyId = "none";
+      }
     }
-    // BUSINESS and ADMIN see ALL invoices (no filter)
+    // ADMIN sees ALL invoices (no filter)
 
     if (status) {
       whereClause.status = status;
@@ -44,6 +68,9 @@ export async function GET(request: NextRequest) {
         },
         recipient: {
           select: { name: true, email: true },
+        },
+        company: {
+          select: { id: true, name: true },
         },
         payments: {
           include: {
@@ -158,6 +185,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Get user's company
+    const userWithCompany = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { companyId: true },
+    });
+
     // Create invoice record with OCR-extracted data
     const invoice = await prisma.invoice.create({
       data: {
@@ -175,6 +208,7 @@ export async function POST(request: NextRequest) {
         },
         uploaderId: user.id,
         recipientId,
+        companyId: userWithCompany?.companyId || null, // Set company from user
       },
       include: {
         uploader: {

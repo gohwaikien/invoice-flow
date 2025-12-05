@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 
-// GET - Fetch payments (for supplier: their recorded payments)
+// GET - Fetch payments (for supplier: their COMPANY's payments)
 export async function GET(request: NextRequest) {
   const authResult = await authenticateRequest(request);
 
@@ -11,12 +11,24 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Get user's company
+    const user = await prisma.user.findUnique({
+      where: { id: authResult.userId },
+      select: { companyId: true, role: true },
+    });
+
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status"); // "unlinked" = no invoice attached
 
-    const where: any = {
-      paidById: authResult.userId,
-    };
+    const where: any = {};
+
+    // Supplier users see all payments from their company
+    if (user?.companyId) {
+      where.companyId = user.companyId;
+    } else {
+      // Fallback for users without company - see only their own
+      where.paidById = authResult.userId;
+    }
 
     if (status === "unlinked") {
       where.invoiceId = null;
@@ -106,6 +118,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // Get user's company
+    const user = await prisma.user.findUnique({
+      where: { id: authResult.userId },
+      select: { companyId: true },
+    });
+
     const body = await request.json();
     const { amount, notes, date } = body;
 
@@ -122,6 +140,7 @@ export async function POST(request: NextRequest) {
         notes: notes || null,
         date: date ? new Date(date) : new Date(),
         paidById: authResult.userId,
+        companyId: user?.companyId || null, // Set company from user
       },
       include: {
         paidBy: {
