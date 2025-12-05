@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, hasRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 // POST - Grant business access to a supplier
@@ -13,7 +13,7 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (session.user.role !== "ADMIN") {
+  if (!hasRole(session.user, "ADMIN")) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -119,7 +119,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (session.user.role !== "ADMIN") {
+  if (!hasRole(session.user, "ADMIN")) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 

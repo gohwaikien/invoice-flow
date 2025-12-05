@@ -25,7 +25,7 @@ interface User {
   name: string | null;
   email: string | null;
   image: string | null;
-  role: "ADMIN" | "SUPPLIER" | "BUSINESS" | null;
+  roles: ("ADMIN" | "SUPPLIER" | "BUSINESS")[];
   companyId: string | null;
   createdAt: string;
   _count: {
@@ -39,7 +39,7 @@ interface Company {
   id: string;
   name: string;
   type: "SUPPLIER" | "BUSINESS";
-  users: { id: string; name: string | null; email: string | null; role: string | null }[];
+  users: { id: string; name: string | null; email: string | null; roles: string[] }[];
   _count: {
     users: number;
     payments: number;
@@ -241,19 +241,21 @@ export function AdminDashboard({ session }: AdminDashboardProps) {
     }
   };
 
-  const updateUserRole = async (userId: string, role: string) => {
+  // Toggle a role for a user (add if missing, remove if present)
+  const toggleUserRole = async (userId: string, role: string) => {
     setUpdatingUserId(userId);
     try {
       const response = await fetch("/api/admin/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, role }),
+        body: JSON.stringify({ userId, role }), // API will toggle the role
       });
 
       if (response.ok) {
+        const updatedUser = await response.json();
         setUsers((prev) =>
           prev.map((u) =>
-            u.id === userId ? { ...u, role: role as User["role"] } : u
+            u.id === userId ? { ...u, roles: updatedUser.roles } : u
           )
         );
       }
@@ -266,10 +268,10 @@ export function AdminDashboard({ session }: AdminDashboardProps) {
 
   const stats = {
     total: users.length,
-    admins: users.filter((u) => u.role === "ADMIN").length,
-    suppliers: users.filter((u) => u.role === "SUPPLIER").length,
-    businesses: users.filter((u) => u.role === "BUSINESS").length,
-    noRole: users.filter((u) => !u.role).length,
+    admins: users.filter((u) => u.roles?.includes("ADMIN")).length,
+    suppliers: users.filter((u) => u.roles?.includes("SUPPLIER")).length,
+    businesses: users.filter((u) => u.roles?.includes("BUSINESS")).length,
+    noRole: users.filter((u) => !u.roles || u.roles.length === 0).length,
   };
 
   const getRoleIcon = (role: string | null) => {
@@ -783,14 +785,21 @@ export function AdminDashboard({ session }: AdminDashboardProps) {
                           {user.email}
                         </td>
                         <td className="px-6 py-4">
-                          <span
-                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${getRoleBadgeClass(
-                              user.role
-                            )}`}
-                          >
-                            {getRoleIcon(user.role)}
-                            {user.role || "None"}
-                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            {user.roles && user.roles.length > 0 ? (
+                              user.roles.map((role) => (
+                                <span
+                                  key={role}
+                                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${getRoleBadgeClass(role)}`}
+                                >
+                                  {getRoleIcon(role)}
+                                  {role}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs text-slate-400">No roles</span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-xs text-slate-500 space-y-1">
@@ -801,34 +810,38 @@ export function AdminDashboard({ session }: AdminDashboardProps) {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex gap-1">
-                            {["ADMIN", "SUPPLIER", "BUSINESS"].map((role) => (
-                              <button
-                                key={role}
-                                onClick={() => updateUserRole(user.id, role)}
-                                disabled={updatingUserId === user.id || user.role === role}
-                                className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                                  user.role === role
-                                    ? role === "ADMIN"
-                                      ? "bg-purple-500 text-white"
-                                      : role === "SUPPLIER"
-                                      ? "bg-blue-500 text-white"
-                                      : "bg-emerald-500 text-white"
-                                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                } ${
-                                  updatingUserId === user.id
-                                    ? "opacity-50 cursor-not-allowed"
-                                    : ""
-                                }`}
-                              >
-                                {updatingUserId === user.id ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : user.role === role ? (
-                                  <Check className="h-3 w-3" />
-                                ) : (
-                                  role.charAt(0) + role.slice(1).toLowerCase()
-                                )}
-                              </button>
-                            ))}
+                            {["ADMIN", "SUPPLIER", "BUSINESS"].map((role) => {
+                              const hasRole = user.roles?.includes(role as "ADMIN" | "SUPPLIER" | "BUSINESS");
+                              return (
+                                <button
+                                  key={role}
+                                  onClick={() => toggleUserRole(user.id, role)}
+                                  disabled={updatingUserId === user.id}
+                                  className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                                    hasRole
+                                      ? role === "ADMIN"
+                                        ? "bg-purple-500 text-white"
+                                        : role === "SUPPLIER"
+                                        ? "bg-blue-500 text-white"
+                                        : "bg-emerald-500 text-white"
+                                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                  } ${
+                                    updatingUserId === user.id
+                                      ? "opacity-50 cursor-not-allowed"
+                                      : ""
+                                  }`}
+                                  title={hasRole ? `Remove ${role} role` : `Add ${role} role`}
+                                >
+                                  {updatingUserId === user.id ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : hasRole ? (
+                                    <Check className="h-3 w-3" />
+                                  ) : (
+                                    role.charAt(0) + role.slice(1).toLowerCase()
+                                  )}
+                                </button>
+                              );
+                            })}
                           </div>
                         </td>
                       </tr>

@@ -101,7 +101,8 @@ model User {
   email         String?   @unique
   emailVerified DateTime?
   image         String?
-  role          UserRole?
+  role          UserRole?           // Legacy field - kept for backward compatibility
+  roles         UserRole[] @default([])  // New: Multiple roles per user
   apiKey        String?   @unique
   accounts      Account[]
   sessions      Session[]

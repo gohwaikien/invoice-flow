@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     // Get user's company
     const user = await prisma.user.findUnique({
       where: { id: authResult.userId },
-      select: { companyId: true, role: true },
+      select: { companyId: true, roles: true },
     });
 
     const { searchParams } = new URL(request.url);

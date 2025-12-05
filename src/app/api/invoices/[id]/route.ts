@@ -92,7 +92,7 @@ export async function PATCH(
         const recipient = await prisma.user.findUnique({
           where: { email: recipientEmail },
         });
-        if (recipient && recipient.role === "BUSINESS") {
+        if (recipient && recipient.roles?.includes("BUSINESS")) {
           recipientId = recipient.id;
         }
       } else {

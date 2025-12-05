@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, hasRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 // POST - Add user to company
@@ -13,7 +13,7 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (session.user.role !== "ADMIN") {
+  if (!hasRole(session.user, "ADMIN")) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -38,18 +38,23 @@ export async function POST(
     // Find the user
     const user = await prisma.user.findUnique({
       where: { email },
+      select: { id: true, roles: true, email: true, name: true },
     });
 
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // Update user's company and role
+    // Update user's company and add company type role if not already present
+    const newRoles = user.roles.includes(company.type)
+      ? user.roles
+      : [...user.roles, company.type];
+
     const updatedUser = await prisma.user.update({
       where: { id: user.id },
       data: {
         companyId,
-        role: company.type, // Set role based on company type
+        roles: newRoles,
       },
     });
 
@@ -59,7 +64,7 @@ export async function POST(
         id: updatedUser.id,
         email: updatedUser.email,
         name: updatedUser.name,
-        role: updatedUser.role,
+        roles: updatedUser.roles,
       },
     });
   } catch (error) {
@@ -82,7 +87,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (session.user.role !== "ADMIN") {
+  if (!hasRole(session.user, "ADMIN")) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 

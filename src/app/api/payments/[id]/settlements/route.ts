@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, hasAnyRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { uploadFile, generateFileKey } from "@/lib/storage";
 
@@ -15,7 +15,7 @@ export async function POST(
   }
 
   // Only BUSINESS or ADMIN can add settlements
-  if (session.user.role !== "BUSINESS" && session.user.role !== "ADMIN") {
+  if (!hasAnyRole(session.user, ["BUSINESS", "ADMIN"])) {
     return NextResponse.json(
       { error: "Only business users can add settlements" },
       { status: 403 }

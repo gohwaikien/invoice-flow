@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, hasRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 // GET all users (admin only)
@@ -13,10 +13,10 @@ export async function GET() {
   // Check if user is admin
   const currentUser = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { role: true },
+    select: { roles: true },
   });
 
-  if (currentUser?.role !== "ADMIN") {
+  if (!currentUser?.roles?.includes("ADMIN")) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -27,7 +27,8 @@ export async function GET() {
         name: true,
         email: true,
         image: true,
-        role: true,
+        roles: true,
+        companyId: true,
         createdAt: true,
         _count: {
           select: {
@@ -50,7 +51,7 @@ export async function GET() {
   }
 }
 
-// PATCH update user role (admin only)
+// PATCH update user roles (admin only)
 export async function PATCH(request: NextRequest) {
   const session = await auth();
 
@@ -61,46 +62,81 @@ export async function PATCH(request: NextRequest) {
   // Check if user is admin
   const currentUser = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { role: true },
+    select: { roles: true },
   });
 
-  if (currentUser?.role !== "ADMIN") {
+  if (!currentUser?.roles?.includes("ADMIN")) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
   try {
-    const { userId, role } = await request.json();
+    const body = await request.json();
+    const { userId, roles, action, role } = body;
 
-    if (!userId || !role) {
+    if (!userId) {
       return NextResponse.json(
-        { error: "userId and role are required" },
+        { error: "userId is required" },
         { status: 400 }
       );
     }
 
-    if (!["ADMIN", "SUPPLIER", "BUSINESS"].includes(role)) {
+    // Support both new format (roles array) and legacy format (single role with action)
+    let newRoles: string[];
+
+    if (roles) {
+      // New format: directly set roles array
+      newRoles = roles.filter((r: string) => ["ADMIN", "SUPPLIER", "BUSINESS"].includes(r));
+    } else if (role && action) {
+      // Legacy format: add or remove a single role
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { roles: true },
+      });
+      const currentRoles = user?.roles || [];
+
+      if (action === "add") {
+        newRoles = [...new Set([...currentRoles, role])];
+      } else if (action === "remove") {
+        newRoles = currentRoles.filter((r) => r !== role);
+      } else {
+        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+      }
+    } else if (role) {
+      // Simple toggle: if has role, remove it; if doesn't have, add it
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { roles: true },
+      });
+      const currentRoles = user?.roles || [];
+
+      if (currentRoles.includes(role)) {
+        newRoles = currentRoles.filter((r) => r !== role);
+      } else {
+        newRoles = [...currentRoles, role];
+      }
+    } else {
       return NextResponse.json(
-        { error: "Invalid role" },
+        { error: "roles array or role is required" },
         { status: 400 }
       );
     }
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: { role },
+      data: { roles: newRoles },
       select: {
         id: true,
         name: true,
         email: true,
-        role: true,
+        roles: true,
       },
     });
 
     return NextResponse.json(updatedUser);
   } catch (error) {
-    console.error("Error updating user role:", error);
+    console.error("Error updating user roles:", error);
     return NextResponse.json(
-      { error: "Failed to update user role" },
+      { error: "Failed to update user roles" },
       { status: 500 }
     );
   }

@@ -10,13 +10,13 @@ export default async function AdminPage() {
     redirect("/auth/signin");
   }
 
-  // Check if user is admin
+  // Check if user has admin role
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { role: true },
+    select: { roles: true },
   });
 
-  if (user?.role !== "ADMIN") {
+  if (!user?.roles?.includes("ADMIN")) {
     redirect("/dashboard");
   }
 

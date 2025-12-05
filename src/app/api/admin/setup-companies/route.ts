@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, hasRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 // POST - Run the initial company setup
@@ -10,7 +10,7 @@ export async function POST() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (session.user.role !== "ADMIN") {
+  if (!hasRole(session.user, "ADMIN")) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -38,11 +38,14 @@ export async function POST() {
     for (const email of supplierEmails) {
       const user = await prisma.user.findUnique({ where: { email } });
       if (user) {
+        // Add SUPPLIER role to existing roles
+        const currentRoles = user.roles || [];
+        const newRoles = currentRoles.includes("SUPPLIER") ? currentRoles : [...currentRoles, "SUPPLIER"];
         await prisma.user.update({
           where: { email },
           data: {
             companyId: supplierCompany.id,
-            role: "SUPPLIER",
+            roles: newRoles,
           },
         });
         logs.push(`✅ Assigned ${email} to ${supplierCompany.name}`);
@@ -102,7 +105,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (session.user.role !== "ADMIN") {
+  if (!hasRole(session.user, "ADMIN")) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 

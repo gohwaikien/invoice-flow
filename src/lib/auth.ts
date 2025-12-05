@@ -15,12 +15,19 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async session({ session, user }) {
       if (session.user) {
         session.user.id = user.id;
-        // Fetch user role from database
+        // Fetch user roles from database (with backward compatibility for legacy role field)
         const dbUser = await prisma.user.findUnique({
           where: { id: user.id },
-          select: { role: true },
+          select: { roles: true, role: true },
         });
-        session.user.role = dbUser?.role ?? null;
+        // Use roles array if available, otherwise convert legacy role to array
+        if (dbUser?.roles && dbUser.roles.length > 0) {
+          session.user.roles = dbUser.roles;
+        } else if (dbUser?.role) {
+          session.user.roles = [dbUser.role];
+        } else {
+          session.user.roles = [];
+        }
       }
       return session;
     },
@@ -29,4 +36,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     signIn: "/auth/signin",
   },
 });
+
+// Helper function to check if user has a specific role
+export function hasRole(user: { roles?: string[] } | null | undefined, role: string): boolean {
+  return user?.roles?.includes(role) ?? false;
+}
+
+// Helper function to check if user has any of the specified roles
+export function hasAnyRole(user: { roles?: string[] } | null | undefined, roles: string[]): boolean {
+  return roles.some(role => user?.roles?.includes(role) ?? false);
+}
 

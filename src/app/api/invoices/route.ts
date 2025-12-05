@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, hasRole, hasAnyRole } from "@/lib/auth";
 import { authenticateRequest } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { uploadFile, generateFileKey } from "@/lib/storage";
@@ -29,10 +29,33 @@ export async function GET(request: NextRequest) {
     // Get user's company info
     const userWithCompany = await prisma.user.findUnique({
       where: { id: user.id },
-      select: { companyId: true, role: true },
+      select: { companyId: true, roles: true },
     });
 
-    if (user.role === "SUPPLIER") {
+    const userRoles = user.roles || userWithCompany?.roles || [];
+    const isAdmin = userRoles.includes("ADMIN");
+    const isSupplier = userRoles.includes("SUPPLIER");
+    const isBusiness = userRoles.includes("BUSINESS");
+
+    if (isAdmin) {
+      // ADMIN sees ALL invoices (no filter)
+    } else if (isSupplier && isBusiness) {
+      // User has both roles - show invoices from their company + accessible suppliers
+      const companyIds: string[] = [];
+      if (userWithCompany?.companyId) {
+        companyIds.push(userWithCompany.companyId);
+        const accessRecords = await prisma.businessAccess.findMany({
+          where: { businessCompanyId: userWithCompany.companyId },
+          select: { supplierCompanyId: true },
+        });
+        companyIds.push(...accessRecords.map((a) => a.supplierCompanyId));
+      }
+      if (companyIds.length > 0) {
+        whereClause.companyId = { in: companyIds };
+      } else {
+        whereClause.uploaderId = user.id;
+      }
+    } else if (isSupplier) {
       // Suppliers see invoices from their company
       if (userWithCompany?.companyId) {
         whereClause.companyId = userWithCompany.companyId;
@@ -40,7 +63,7 @@ export async function GET(request: NextRequest) {
         // Fallback: see only their own uploaded invoices
         whereClause.uploaderId = user.id;
       }
-    } else if (user.role === "BUSINESS") {
+    } else if (isBusiness) {
       // Business users see invoices from suppliers they have access to
       if (userWithCompany?.companyId) {
         const accessRecords = await prisma.businessAccess.findMany({
@@ -54,7 +77,6 @@ export async function GET(request: NextRequest) {
         whereClause.companyId = "none";
       }
     }
-    // ADMIN sees ALL invoices (no filter)
 
     if (status) {
       whereClause.status = status;
@@ -117,7 +139,8 @@ export async function POST(request: NextRequest) {
     user = session.user;
   }
 
-  if (user.role !== "SUPPLIER") {
+  const userRoles = user.roles || [];
+  if (!userRoles.includes("SUPPLIER") && !userRoles.includes("ADMIN")) {
     return NextResponse.json(
       { error: "Only suppliers can upload invoices" },
       { status: 403 }
@@ -180,7 +203,7 @@ export async function POST(request: NextRequest) {
       const recipient = await prisma.user.findUnique({
         where: { email: recipientEmail },
       });
-      if (recipient && recipient.role === "BUSINESS") {
+      if (recipient && recipient.roles?.includes("BUSINESS")) {
         recipientId = recipient.id;
       }
     }

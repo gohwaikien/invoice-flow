@@ -9,7 +9,7 @@ interface AuthResult {
     id: string;
     name: string | null;
     email: string | null;
-    role: string | null;
+    roles: string[];
   };
 }
 
@@ -30,18 +30,23 @@ export async function authenticateRequest(
         id: true,
         name: true,
         email: true,
-        role: true,
+        roles: true,
+        role: true, // Legacy field
       },
     });
 
     if (user) {
+      // Use roles array if available, otherwise convert legacy role to array
+      const roles = user.roles && user.roles.length > 0 
+        ? user.roles 
+        : user.role ? [user.role] : [];
       return {
         userId: user.id,
         user: {
           id: user.id,
           name: user.name,
           email: user.email,
-          role: user.role,
+          roles,
         },
       };
     }
@@ -57,12 +62,22 @@ export async function authenticateRequest(
         id: session.user.id,
         name: session.user.name || null,
         email: session.user.email || null,
-        role: session.user.role || null,
+        roles: session.user.roles || [],
       },
     };
   }
 
   return null;
+}
+
+// Helper function to check if user has a specific role
+export function hasRole(user: { roles?: string[] } | null | undefined, role: string): boolean {
+  return user?.roles?.includes(role) ?? false;
+}
+
+// Helper function to check if user has any of the specified roles
+export function hasAnyRole(user: { roles?: string[] } | null | undefined, roles: string[]): boolean {
+  return roles.some(role => user?.roles?.includes(role) ?? false);
 }
 
 /**

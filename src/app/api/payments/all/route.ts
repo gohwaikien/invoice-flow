@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, hasAnyRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 // GET - Fetch all payments (for business users to see and settle)
@@ -10,8 +10,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const userRoles = session.user.roles || [];
+  const isAdmin = userRoles.includes("ADMIN");
+  const isBusiness = userRoles.includes("BUSINESS");
+
   // Only BUSINESS or ADMIN can see all payments
-  if (session.user.role !== "BUSINESS" && session.user.role !== "ADMIN") {
+  if (!isBusiness && !isAdmin) {
     return NextResponse.json(
       { error: "Only business users can view all payments" },
       { status: 403 }
@@ -22,7 +26,7 @@ export async function GET(request: NextRequest) {
     // Get accessible supplier company IDs for business users
     let accessibleCompanyIds: string[] | null = null;
 
-    if (session.user.role === "BUSINESS") {
+    if (isBusiness && !isAdmin) {
       // Get user's company
       const user = await prisma.user.findUnique({
         where: { id: session.user.id },

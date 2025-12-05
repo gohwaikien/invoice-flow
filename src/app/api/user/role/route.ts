@@ -16,26 +16,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid role" }, { status: 400 });
     }
 
-    // Check if user already has a role
+    // Check if user already has roles
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
     });
 
-    if (user?.role) {
+    if (user?.roles && user.roles.length > 0) {
       return NextResponse.json(
-        { error: "Role already set. Contact admin to change." },
+        { error: "Roles already set. Contact admin to change." },
         { status: 400 }
       );
     }
 
+    // Set the initial role in the roles array
     const updatedUser = await prisma.user.update({
       where: { id: session.user.id },
-      data: { role },
+      data: { roles: [role] },
     });
 
     return NextResponse.json({
       success: true,
-      role: updatedUser.role,
+      roles: updatedUser.roles,
     });
   } catch (error) {
     console.error("Error setting role:", error);

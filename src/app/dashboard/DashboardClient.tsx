@@ -53,11 +53,21 @@ export function DashboardClient({ session }: DashboardClientProps) {
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
 
-  const userRole = session.user.role as "ADMIN" | "SUPPLIER" | "BUSINESS";
+  // Check which roles the user has
+  const userRoles = session.user.roles || [];
+  const isAdmin = userRoles.includes("ADMIN");
+  const isSupplier = userRoles.includes("SUPPLIER");
+  const isBusiness = userRoles.includes("BUSINESS");
   
-  // Admin can switch between Supplier and Business views
-  const [activeView, setActiveView] = useState<"SUPPLIER" | "BUSINESS">("SUPPLIER");
-  const effectiveRole = userRole === "ADMIN" ? activeView : userRole;
+  // Determine if user can switch views (admin OR has multiple roles)
+  const canSwitchViews = isAdmin || (isSupplier && isBusiness);
+  
+  // Default view: prioritize SUPPLIER if user has it, otherwise BUSINESS
+  const defaultView = isSupplier ? "SUPPLIER" : "BUSINESS";
+  const [activeView, setActiveView] = useState<"SUPPLIER" | "BUSINESS">(defaultView);
+  
+  // Effective role determines what UI to show
+  const effectiveRole = activeView;
 
   const [paymentsKey, setPaymentsKey] = useState(0); // To trigger refresh
   
@@ -207,15 +217,15 @@ export function DashboardClient({ session }: DashboardClientProps) {
                   <Building2 className="h-3.5 w-3.5 text-slate-400" />
                 )}
                 <span className="text-xs text-slate-500">
-                  {userRole === "ADMIN" ? `Admin (${effectiveRole})` : userRole}
+                  {isAdmin ? `Admin (${effectiveRole})` : userRoles.join(" + ")}
                 </span>
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Admin View Switcher */}
-            {userRole === "ADMIN" && (
+            {/* View Switcher - shown to admins or users with multiple roles */}
+            {canSwitchViews && (
               <div className="flex items-center rounded-lg border border-slate-200 bg-white p-1">
                 <button
                   onClick={() => setActiveView("SUPPLIER")}
@@ -242,7 +252,7 @@ export function DashboardClient({ session }: DashboardClientProps) {
               </div>
             )}
             {/* Admin Link */}
-            {userRole === "ADMIN" && (
+            {isAdmin && (
               <Link href="/admin">
                 <Button variant="outline" size="sm" className="gap-2">
                   <Shield className="h-4 w-4 text-purple-500" />

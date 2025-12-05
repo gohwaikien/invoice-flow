@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, hasAnyRole, hasRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 // PUT - Update a settlement
@@ -14,7 +14,7 @@ export async function PUT(
   }
 
   // Only BUSINESS or ADMIN can update settlements
-  if (session.user.role !== "BUSINESS" && session.user.role !== "ADMIN") {
+  if (!hasAnyRole(session.user, ["BUSINESS", "ADMIN"])) {
     return NextResponse.json(
       { error: "Only business users can update settlements" },
       { status: 403 }
@@ -38,7 +38,7 @@ export async function PUT(
     }
 
     // Only allow update by the user who created it (or admin)
-    if (settlement.settledById !== session.user.id && session.user.role !== "ADMIN") {
+    if (settlement.settledById !== session.user.id && !hasRole(session.user, "ADMIN")) {
       return NextResponse.json(
         { error: "You can only update your own settlements" },
         { status: 403 }
@@ -144,7 +144,7 @@ export async function DELETE(
   }
 
   // Only BUSINESS or ADMIN can delete settlements
-  if (session.user.role !== "BUSINESS" && session.user.role !== "ADMIN") {
+  if (!hasAnyRole(session.user, ["BUSINESS", "ADMIN"])) {
     return NextResponse.json(
       { error: "Only business users can delete settlements" },
       { status: 403 }
@@ -165,7 +165,7 @@ export async function DELETE(
     }
 
     // Only allow deletion by the user who created it (or admin)
-    if (settlement.settledById !== session.user.id && session.user.role !== "ADMIN") {
+    if (settlement.settledById !== session.user.id && !hasRole(session.user, "ADMIN")) {
       return NextResponse.json(
         { error: "You can only delete your own settlements" },
         { status: 403 }

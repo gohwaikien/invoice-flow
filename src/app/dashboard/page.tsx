@@ -9,7 +9,8 @@ export default async function DashboardPage() {
     redirect("/auth/signin");
   }
 
-  if (!session.user.role) {
+  // Check if user has at least one role
+  if (!session.user.roles || session.user.roles.length === 0) {
     redirect("/onboarding");
   }
 
