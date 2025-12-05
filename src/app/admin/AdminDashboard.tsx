@@ -98,9 +98,53 @@ export function AdminDashboard({ session }: AdminDashboardProps) {
     }
   };
 
+  // Setup state
+  const [setupStatus, setSetupStatus] = useState<{
+    needsSetup: boolean;
+    unassignedPayments: number;
+    unassignedInvoices: number;
+  } | null>(null);
+  const [isRunningSetup, setIsRunningSetup] = useState(false);
+  const [setupResult, setSetupResult] = useState<{ success: boolean; logs: string[] } | null>(null);
+
+  const fetchSetupStatus = async () => {
+    try {
+      const response = await fetch("/api/admin/setup-companies");
+      if (response.ok) {
+        const data = await response.json();
+        setSetupStatus(data);
+      }
+    } catch (error) {
+      console.error("Error fetching setup status:", error);
+    }
+  };
+
+  const runSetup = async () => {
+    setIsRunningSetup(true);
+    setSetupResult(null);
+    try {
+      const response = await fetch("/api/admin/setup-companies", {
+        method: "POST",
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setSetupResult({ success: true, logs: data.logs });
+        fetchAll();
+        fetchSetupStatus();
+      } else {
+        setSetupResult({ success: false, logs: [data.error || "Setup failed"] });
+      }
+    } catch (error) {
+      console.error("Error running setup:", error);
+      setSetupResult({ success: false, logs: ["Failed to run setup"] });
+    } finally {
+      setIsRunningSetup(false);
+    }
+  };
+
   const fetchAll = async () => {
     setIsLoading(true);
-    await Promise.all([fetchUsers(), fetchCompanies()]);
+    await Promise.all([fetchUsers(), fetchCompanies(), fetchSetupStatus()]);
     setIsLoading(false);
   };
 
@@ -330,6 +374,46 @@ export function AdminDashboard({ session }: AdminDashboardProps) {
         {/* Companies Tab */}
         {activeTab === "companies" && (
           <div className="space-y-6">
+            {/* Setup Banner */}
+            {setupStatus?.needsSetup && (
+              <Card className="border-amber-200 bg-amber-50">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-amber-800">Initial Setup Required</h3>
+                      <p className="text-sm text-amber-700 mt-1">
+                        {setupStatus.unassignedPayments > 0 && `${setupStatus.unassignedPayments} payments `}
+                        {setupStatus.unassignedPayments > 0 && setupStatus.unassignedInvoices > 0 && "and "}
+                        {setupStatus.unassignedInvoices > 0 && `${setupStatus.unassignedInvoices} invoices `}
+                        need to be assigned to a company.
+                      </p>
+                    </div>
+                    <Button 
+                      onClick={runSetup} 
+                      disabled={isRunningSetup}
+                      className="bg-amber-600 hover:bg-amber-700"
+                    >
+                      {isRunningSetup ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Running Setup...
+                        </>
+                      ) : (
+                        "Run Setup"
+                      )}
+                    </Button>
+                  </div>
+                  {setupResult && (
+                    <div className={`mt-4 p-3 rounded-lg text-sm ${setupResult.success ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+                      {setupResult.logs.map((log, i) => (
+                        <p key={i}>{log}</p>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Create Company Button */}
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-slate-900">
